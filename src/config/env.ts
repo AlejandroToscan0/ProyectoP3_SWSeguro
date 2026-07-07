@@ -14,6 +14,7 @@ const envSchema = z.object({
   ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
   TEMP_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(7),
+  INTERNAL_API_KEY: z.string().min(32),
 });
 
 const parsed = envSchema.safeParse(process.env);

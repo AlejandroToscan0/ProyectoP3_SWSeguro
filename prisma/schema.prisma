@@ -16,6 +16,7 @@ enum AuditAction {
   LOGIN_FAILED
   ROLE_SELECTED
   TOKEN_REFRESHED
+  TOKEN_REVOKED
   LOGOUT
   UNAUTHORIZED_ATTEMPT
 }
@@ -32,6 +33,7 @@ model User {
   actualizadoPor    String?
   userRoles         UserRole[]
   refreshTokens     RefreshToken[]
+  tokenRevocations  TokenRevocation[]
   auditLogs         AuditLog[]
 }
 
@@ -46,6 +48,7 @@ model Role {
   actualizadoPor    String?
   userRoles         UserRole[]
   rolePermissions   RolePermission[]
+  refreshTokens     RefreshToken[]
   auditLogs         AuditLog[]
 }
 
@@ -98,6 +101,7 @@ model RolePermission {
 model RefreshToken {
   id                String      @id @default(uuid())
   userId            String
+  roleId            String
   tokenHash         String
   expiracion        DateTime
   revocado          Boolean     @default(false)
@@ -108,7 +112,27 @@ model RefreshToken {
   creadoPor         String?
   actualizadoPor    String?
   user              User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  role              Role        @relation(fields: [roleId], references: [id], onDelete: Restrict)
 
+  @@index([userId])
+  @@index([roleId])
+  @@index([expiracion])
+}
+
+model TokenRevocation {
+  id                String      @id @default(uuid())
+  jti               String      @unique
+  userId            String?
+  reason            String?
+  expiracion        DateTime
+  estado            Estado      @default(ACTIVO)
+  fechaCreacion     DateTime    @default(now())
+  fechaActualizacion DateTime   @updatedAt
+  creadoPor         String?
+  actualizadoPor    String?
+  user              User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([jti])
   @@index([userId])
   @@index([expiracion])
 }

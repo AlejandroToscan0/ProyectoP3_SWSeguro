@@ -2,7 +2,7 @@ import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { prisma } from "../../lib/prisma.js";
 import { AuthService } from "./auth.service.js";
-import { loginSchema, selectRoleSchema } from "./auth.schemas.js";
+import { loginSchema, logoutSchema, refreshTokenSchema, selectRoleSchema } from "./auth.schemas.js";
 
 const authRouter = Router();
 const authService = new AuthService(prisma);
@@ -43,6 +43,40 @@ authRouter.post("/select-role", authRateLimit, async (req, res, next) => {
       userAgent: req.get("user-agent"),
     };
     const result = await authService.selectRole(input, {
+      ip: meta.ip ?? undefined,
+      userAgent: meta.userAgent ?? undefined,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+authRouter.post("/refresh-token", authRateLimit, async (req, res, next) => {
+  try {
+    const input = refreshTokenSchema.parse(req.body);
+    const meta = {
+      ip: req.ip,
+      userAgent: req.get("user-agent"),
+    };
+    const result = await authService.refreshToken(input, {
+      ip: meta.ip ?? undefined,
+      userAgent: meta.userAgent ?? undefined,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+authRouter.post("/logout", authRateLimit, async (req, res, next) => {
+  try {
+    const input = logoutSchema.parse(req.body);
+    const meta = {
+      ip: req.ip,
+      userAgent: req.get("user-agent"),
+    };
+    const result = await authService.logout(input, {
       ip: meta.ip ?? undefined,
       userAgent: meta.userAgent ?? undefined,
     });

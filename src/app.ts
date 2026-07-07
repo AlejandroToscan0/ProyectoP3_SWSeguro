@@ -4,6 +4,7 @@ import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 import { logger } from "./config/logger.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
+import { internalsRouter } from "./modules/internals/internals.routes.js";
 import { errorHandler, notFoundHandler } from "./middlewares/error-handler.js";
 
 export function createApp() {
@@ -19,6 +20,7 @@ export function createApp() {
   });
 
   app.use("/api/auth", authRouter);
+  app.use("/api/internals", internalsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
