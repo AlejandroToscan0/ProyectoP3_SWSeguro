@@ -11,7 +11,11 @@
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
-    "prisma:seed": "tsx prisma/seed.ts"
+    "prisma:seed": "tsx prisma/seed.ts",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:reset": "npm run prisma:push && npm run prisma:seed",
+    "smoke": "node scripts/smoke-test.mjs"
   },
   "repository": {
     "type": "git",
