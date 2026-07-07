@@ -1,0 +1,135 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Estado {
+  ACTIVO
+  INACTIVO
+}
+
+enum AuditAction {
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  ROLE_SELECTED
+  TOKEN_REFRESHED
+  LOGOUT
+  UNAUTHORIZED_ATTEMPT
+}
+
+model User {
+  id                String         @id @default(uuid())
+  nombre            String
+  email             String         @unique
+  passwordHash      String
+  estado            Estado         @default(ACTIVO)
+  fechaCreacion     DateTime       @default(now())
+  fechaActualizacion DateTime      @updatedAt
+  creadoPor         String?
+  actualizadoPor    String?
+  userRoles         UserRole[]
+  refreshTokens     RefreshToken[]
+  auditLogs         AuditLog[]
+}
+
+model Role {
+  id                String           @id @default(uuid())
+  nombre            String           @unique
+  descripcion       String?
+  estado            Estado           @default(ACTIVO)
+  fechaCreacion     DateTime         @default(now())
+  fechaActualizacion DateTime        @updatedAt
+  creadoPor         String?
+  actualizadoPor    String?
+  userRoles         UserRole[]
+  rolePermissions   RolePermission[]
+  auditLogs         AuditLog[]
+}
+
+model UserRole {
+  id                String      @id @default(uuid())
+  userId            String
+  roleId            String
+  estado            Estado      @default(ACTIVO)
+  fechaCreacion     DateTime    @default(now())
+  fechaActualizacion DateTime   @updatedAt
+  creadoPor         String?
+  actualizadoPor    String?
+  user              User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  role              Role        @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+}
+
+model Permission {
+  id                String           @id @default(uuid())
+  codigo            String           @unique
+  descripcion       String?
+  estado            Estado           @default(ACTIVO)
+  fechaCreacion     DateTime         @default(now())
+  fechaActualizacion DateTime        @updatedAt
+  creadoPor         String?
+  actualizadoPor    String?
+  rolePermissions   RolePermission[]
+}
+
+model RolePermission {
+  id                String       @id @default(uuid())
+  roleId            String
+  permissionId      String
+  estado            Estado       @default(ACTIVO)
+  fechaCreacion     DateTime     @default(now())
+  fechaActualizacion DateTime    @updatedAt
+  creadoPor         String?
+  actualizadoPor    String?
+  role              Role         @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  permission        Permission   @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+}
+
+model RefreshToken {
+  id                String      @id @default(uuid())
+  userId            String
+  tokenHash         String
+  expiracion        DateTime
+  revocado          Boolean     @default(false)
+  reemplazadoPor    String?
+  estado            Estado      @default(ACTIVO)
+  fechaCreacion     DateTime    @default(now())
+  fechaActualizacion DateTime   @updatedAt
+  creadoPor         String?
+  actualizadoPor    String?
+  user              User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([expiracion])
+}
+
+model AuditLog {
+  id                String      @id @default(uuid())
+  userId            String?
+  roleId            String?
+  action            AuditAction
+  detail            String?
+  ipAddress         String?
+  userAgent         String?
+  estado            Estado      @default(ACTIVO)
+  fechaCreacion     DateTime    @default(now())
+  fechaActualizacion DateTime   @updatedAt
+  creadoPor         String?
+  actualizadoPor    String?
+  user              User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  role              Role?       @relation(fields: [roleId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([roleId])
+  @@index([action])
+}
