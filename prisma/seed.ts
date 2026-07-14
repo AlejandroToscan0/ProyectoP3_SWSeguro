@@ -52,38 +52,6 @@ async function main() {
     },
   });
 
-  const permissions = ["AUTH_LOGIN", "AUTH_SELECT_ROLE", "USERS_READ", "ROLES_READ"];
-  for (const code of permissions) {
-    const permission = await prisma.permission.upsert({
-      where: { codigo: code },
-      update: { estado: Estado.ACTIVO, actualizadoPor: "seed" },
-      create: {
-        codigo: code,
-        descripcion: `Permiso ${code}`,
-        estado: Estado.ACTIVO,
-        creadoPor: "seed",
-        actualizadoPor: "seed",
-      },
-    });
-
-    await prisma.rolePermission.upsert({
-      where: {
-        roleId_permissionId: {
-          roleId: role.id,
-          permissionId: permission.id,
-        },
-      },
-      update: { estado: Estado.ACTIVO, actualizadoPor: "seed" },
-      create: {
-        roleId: role.id,
-        permissionId: permission.id,
-        estado: Estado.ACTIVO,
-        creadoPor: "seed",
-        actualizadoPor: "seed",
-      },
-    });
-  }
-
   await prisma.userRole.upsert({
     where: {
       userId_roleId: {
