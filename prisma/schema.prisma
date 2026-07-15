@@ -47,9 +47,40 @@ model Role {
   creadoPor         String?
   actualizadoPor    String?
   userRoles         UserRole[]
+  rolePermissions   RolePermission[]
   roleModules       RoleModule[]
+  roleMenus         RoleMenu[]
   refreshTokens     RefreshToken[]
   auditLogs         AuditLog[]
+}
+
+model Permission {
+  id                String           @id @default(uuid())
+  codigo            String           @unique
+  descripcion       String?
+  estado            Estado           @default(ACTIVO)
+  fechaCreacion     DateTime         @default(now())
+  fechaActualizacion DateTime        @updatedAt
+  creadoPor         String?
+  actualizadoPor    String?
+  rolePermissions   RolePermission[]
+}
+
+model RolePermission {
+  id                String      @id @default(uuid())
+  roleId            String
+  permissionId      String
+  estado            Estado      @default(ACTIVO)
+  fechaCreacion     DateTime    @default(now())
+  fechaActualizacion DateTime   @updatedAt
+  creadoPor         String?
+  actualizadoPor    String?
+  role              Role        @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  permission        Permission  @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
 }
 
 model UserRole {
@@ -99,6 +130,23 @@ model RoleModule {
   @@index([moduleId])
 }
 
+model RoleMenu {
+  id                String       @id @default(uuid())
+  roleId            String
+  menuId            String
+  estado            Estado       @default(ACTIVO)
+  fechaCreacion     DateTime     @default(now())
+  fechaActualizacion DateTime    @updatedAt
+  creadoPor         String?
+  actualizadoPor    String?
+  role              Role         @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  menu              Menu         @relation(fields: [menuId], references: [id], onDelete: Restrict)
+
+  @@unique([roleId, menuId])
+  @@index([roleId])
+  @@index([menuId])
+}
+
 model Menu {
   id                String       @id @default(uuid())
   nombre            String
@@ -113,6 +161,7 @@ model Menu {
   module            Module       @relation(fields: [moduleId], references: [id], onDelete: Restrict)
   parent            Menu?        @relation("MenuHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
   children          Menu[]       @relation("MenuHierarchy")
+  roleMenus         RoleMenu[]
 
   @@index([moduleId])
   @@index([parentId])
