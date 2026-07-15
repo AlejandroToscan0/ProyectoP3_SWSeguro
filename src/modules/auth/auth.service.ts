@@ -43,17 +43,12 @@ type RefreshResponse = {
 };
 
 type ValidateTokenResponse = {
-  active: boolean;
+  válido: boolean;
   userId: string;
   roleId: string;
-  roleName: string;
-  permissions: string[];
-  exp: number;
-  iat?: number;
-  jti: string;
 };
 
-const encoder = new TextEncoder();
+export const encoder = new TextEncoder();
 
 async function signToken(
   payload: Record<string, unknown>,
@@ -166,7 +161,18 @@ export class AuthService {
       throw new HttpError(403, "ROLE_NOT_ALLOWED", "El rol seleccionado no es valido");
     }
 
-    const permissions: string[] = [];
+    const rolePermissions = await this.db.rolePermission.findMany({
+      where: {
+        roleId: userRole.role.id,
+        estado: Estado.ACTIVO,
+        permission: { estado: Estado.ACTIVO },
+      },
+      include: {
+        permission: true,
+      },
+    });
+
+    const permissions = rolePermissions.map((rp: { permission: { codigo: string } }) => rp.permission.codigo);
     const session = await this.issueSession(userId, userRole.role.id, userRole.role.nombre, permissions);
 
     await this.logAudit({
@@ -344,14 +350,9 @@ export class AuthService {
     }
 
     return {
-      active: true,
+      válido: true,
       userId: payload.sub,
       roleId: payload.roleId,
-      roleName: payload.roleName,
-      permissions: payload.permissions,
-      exp: payload.exp,
-      ...(payload.iat !== undefined ? { iat: payload.iat } : {}),
-      jti: payload.jti,
     };
   }
 
