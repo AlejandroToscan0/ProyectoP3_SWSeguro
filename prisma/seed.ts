@@ -52,7 +52,24 @@ async function main() {
     },
   });
 
-  const permissions = ["AUTH_LOGIN", "AUTH_SELECT_ROLE", "USERS_READ", "ROLES_READ"];
+  await prisma.userRole.upsert({
+    where: {
+      userId_roleId: {
+        userId: user.id,
+        roleId: role.id,
+      },
+    },
+    update: { estado: Estado.ACTIVO, actualizadoPor: "seed" },
+    create: {
+      userId: user.id,
+      roleId: role.id,
+      estado: Estado.ACTIVO,
+      creadoPor: "seed",
+      actualizadoPor: "seed",
+    },
+  });
+
+  const permissions = ["AUTH_LOGIN", "AUTH_SELECT_ROLE", "USERS_READ", "USERS_CREATE", "USERS_UPDATE", "USERS_DELETE", "ROLES_READ", "ROLES_CREATE", "ROLES_UPDATE", "ROLES_DELETE", "ROLES_ASSIGN_USER", "ROLES_REMOVE_USER", "MODULES_READ", "MODULES_CREATE", "MODULES_UPDATE", "MODULES_DELETE", "MENUS_READ", "MENUS_CREATE", "MENUS_UPDATE", "MENUS_DELETE", "ROLES_ASSIGN_MODULE", "ROLES_ASSIGN_MENU"];
   for (const code of permissions) {
     const permission = await prisma.permission.upsert({
       where: { codigo: code },
@@ -84,17 +101,93 @@ async function main() {
     });
   }
 
-  await prisma.userRole.upsert({
+  const module = await prisma.module.upsert({
+    where: { nombre: "Administración" },
+    update: { estado: Estado.ACTIVO, actualizadoPor: "seed" },
+    create: {
+      nombre: "Administración",
+      descripcion: "Módulo de administración del sistema",
+      estado: Estado.ACTIVO,
+      creadoPor: "seed",
+      actualizadoPor: "seed",
+    },
+  });
+
+  await prisma.roleModule.upsert({
     where: {
-      userId_roleId: {
-        userId: user.id,
+      roleId_moduleId: {
         roleId: role.id,
+        moduleId: module.id,
       },
     },
     update: { estado: Estado.ACTIVO, actualizadoPor: "seed" },
     create: {
-      userId: user.id,
       roleId: role.id,
+      moduleId: module.id,
+      estado: Estado.ACTIVO,
+      creadoPor: "seed",
+      actualizadoPor: "seed",
+    },
+  });
+
+  const menuUsuarios = await prisma.menu.upsert({
+    where: { id: "menu-usuarios" },
+    update: { estado: Estado.ACTIVO, actualizadoPor: "seed" },
+    create: {
+      id: "menu-usuarios",
+      nombre: "Usuarios",
+      url: "/usuarios",
+      moduleId: module.id,
+      parentId: null,
+      estado: Estado.ACTIVO,
+      creadoPor: "seed",
+      actualizadoPor: "seed",
+    },
+  });
+
+  await prisma.roleMenu.upsert({
+    where: {
+      roleId_menuId: {
+        roleId: role.id,
+        menuId: menuUsuarios.id,
+      },
+    },
+    update: { estado: Estado.ACTIVO, actualizadoPor: "seed" },
+    create: {
+      roleId: role.id,
+      menuId: menuUsuarios.id,
+      estado: Estado.ACTIVO,
+      creadoPor: "seed",
+      actualizadoPor: "seed",
+    },
+  });
+
+  const menuRoles = await prisma.menu.upsert({
+    where: { id: "menu-roles" },
+    update: { estado: Estado.ACTIVO, actualizadoPor: "seed" },
+    create: {
+      id: "menu-roles",
+      nombre: "Roles",
+      url: "/roles",
+      moduleId: module.id,
+      parentId: null,
+      estado: Estado.ACTIVO,
+      creadoPor: "seed",
+      actualizadoPor: "seed",
+    },
+  });
+
+  await prisma.roleMenu.upsert({
+    where: {
+      roleId_menuId: {
+        roleId: role.id,
+        menuId: menuRoles.id,
+      },
+    },
+    update: { estado: Estado.ACTIVO, actualizadoPor: "seed" },
+    create: {
+      roleId: role.id,
+      menuId: menuRoles.id,
       estado: Estado.ACTIVO,
       creadoPor: "seed",
       actualizadoPor: "seed",

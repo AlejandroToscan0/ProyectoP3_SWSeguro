@@ -1,3 +1,5 @@
+import "dotenv/config";
+
 const baseUrl = process.env.BASE_URL ?? "http://localhost:3000";
 const internalApiKey = process.env.INTERNAL_API_KEY;
 const email = process.env.SEED_ADMIN_EMAIL ?? "admin@example.com";
