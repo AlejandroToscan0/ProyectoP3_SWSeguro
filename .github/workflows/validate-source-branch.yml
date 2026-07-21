@@ -1,0 +1,81 @@
+name: Validar rama de origen
+
+# Valida la política de ramas del proyecto:
+# - main solo acepta Pull Requests desde test
+# - test solo acepta Pull Requests desde dev
+#
+# Para que el bloqueo sea efectivo en GitHub:
+# 1. Branch protection en main y test
+# 2. Require status checks to pass: source-branch-policy
+# 3. Restrict who can push (idealmente nadie; solo PR)
+
+on:
+  pull_request_target:
+    branches:
+      - main
+      - test
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
+      - ready_for_review
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  validate-source-branch:
+    name: Validar rama de origen
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Comprobar rama de origen
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pullRequest = context.payload.pull_request;
+            const repository = `${context.repo.owner}/${context.repo.repo}`;
+            const base = pullRequest.base.ref;
+            const head = pullRequest.head.ref;
+            const headRepo = pullRequest.head.repo?.full_name;
+
+            // Solo se permiten PR desde el mismo repositorio (no forks).
+            const sameRepository = headRepo === repository;
+
+            // Política oficial del proyecto:
+            // main <- test
+            // test <- dev
+            const allowedByPolicy =
+              (base === "main" && head === "test") ||
+              (base === "test" && head === "dev");
+
+            const isAllowed = sameRepository && allowedByPolicy;
+
+            const successDescription =
+              base === "main"
+                ? "Merge autorizado: test → main"
+                : "Merge autorizado: dev → test";
+
+            const failureDescription = sameRepository
+              ? `Rama origen no permitida: ${head} → ${base}`
+              : "Solo se permiten PR desde este mismo repositorio";
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: pullRequest.head.sha,
+              state: isAllowed ? "success" : "failure",
+              context: "source-branch-policy",
+              description: isAllowed ? successDescription : failureDescription
+            });
+
+            if (!isAllowed) {
+              core.setFailed(
+                `Merge bloqueado: ${head} → ${base}. ` +
+                `Regla: main solo desde test; test solo desde dev. ` +
+                `Y el PR debe originarse en este mismo repositorio.`
+              );
+            }

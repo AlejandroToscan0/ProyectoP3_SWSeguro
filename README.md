@@ -100,6 +100,9 @@ ProyectoP3_SWSeguro/
 ├── test/
 │   ├── auth.schemas.test.ts
 │   └── auth.service.test.ts
+├── .github/
+│   └── workflows/
+│       └── validate-source-branch.yml
 ├── docker-compose.yml
 ├── .env.example
 ├── package.json
@@ -258,6 +261,32 @@ curl -X POST http://localhost:3000/api/internals/validate-token \
 - Si aparece error de token, suele ser token incompleto, expirado o ya revocado.
 - Si aparece `401`, faltan credenciales o no son válidas.
 - Si aparece `403`, el usuario sí existe, pero no tiene permisos para esa acción.
+
+## Política de ramas (protección)
+
+Flujo permitido:
+
+```text
+feature/*  →  dev  →  test  →  main
+```
+
+Reglas aplicadas por el workflow `.github/workflows/validate-source-branch.yml`:
+
+- `main` solo acepta Pull Requests desde `test`
+- `test` solo acepta Pull Requests desde `dev`
+- no se permiten Pull Requests desde forks externos
+
+### Cómo dejar el bloqueo efectivo en GitHub
+
+1. Protege las ramas `main` y `test` (Settings → Branches → Branch protection rules).
+2. Activa:
+   - Require a pull request before merging
+   - Require status checks to pass before merging
+   - Status check obligatorio: `source-branch-policy`
+   - Do not allow bypassing the above settings (si está disponible)
+3. Restringe push directo a `main` y `test` (idealmente nadie puede hacer push; solo merge por PR).
+
+Sin el status check obligatorio, el workflow reporta fallo pero GitHub aún podría permitir el merge.
 
 ## Seguridad mínima recomendada en desarrollo
 
