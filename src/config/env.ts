@@ -15,6 +15,7 @@ const envSchema = z.object({
   TEMP_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(7),
   INTERNAL_API_KEY: z.string().min(32),
+  ML_MODEL_NAME: z.string().default("mahdin70/CodeBERT-VulnCWE"),
 });
 
 const parsed = envSchema.safeParse(process.env);

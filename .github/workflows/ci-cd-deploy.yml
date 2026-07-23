@@ -1,0 +1,111 @@
+name: CI/CD Pipeline and Deploy
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  ci-cd:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Notificar inicio del pipeline
+        run: |
+          curl -s -X POST "${{ secrets.TELEGRAM_API_URL }}" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "text=Pipeline iniciado en MAIN"
+
+      # ──────────────────────────────
+      # Fase 1: Build y Tests
+      # ──────────────────────────────
+      - name: Build
+        run: npm run build
+
+      - name: Tests
+        run: npm run test
+
+      # ──────────────────────────────
+      # Fase 2: Análisis Shift-Left (SonarCloud)
+      # ──────────────────────────────
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@v3
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        continue-on-error: true
+        id: sonar
+
+      - name: Notificar fallo de SonarCloud
+        if: steps.sonar.outcome == 'failure'
+        run: |
+          curl -s -X POST "${{ secrets.TELEGRAM_API_URL }}" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "text=SonarCloud rechazó el código"
+          exit 1
+
+      # ──────────────────────────────
+      # Fase 3: SAST Avanzado (Modelo ML)
+      # ──────────────────────────────
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias Python (ML)
+        run: |
+          pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
+          pip install transformers sentencepiece
+
+      - name: Ejecutar análisis SAST con CodeBERT-VulnCWE
+        id: ml-scan
+        run: python scripts/sast_scan.py
+        env:
+          ML_MODEL_NAME: ${{ vars.ML_MODEL_NAME || 'mahdin70/CodeBERT-VulnCWE' }}
+
+      - name: Notificar alerta de vulnerabilidad
+        if: steps.ml-scan.outputs.vulnerable == 'true'
+        run: |
+          curl -s -X POST "${{ secrets.TELEGRAM_API_URL }}" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "text=ALERTA: Modelo ML detectó patrón sospechoso en el código"
+          exit 1
+
+      # ──────────────────────────────
+      # Fase 4: Despliegue (Zero Trust Pipeline)
+      # ──────────────────────────────
+      - name: Notificar despliegue
+        if: steps.ml-scan.outputs.vulnerable != 'true'
+        run: |
+          curl -s -X POST "${{ secrets.TELEGRAM_API_URL }}" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "text=Seguridad validada. Desplegando..."
+
+      - name: Desplegar en Railway
+        if: steps.ml-scan.outputs.vulnerable != 'true'
+        run: |
+          npx railway up --service ${{ secrets.RAILWAY_SERVICE }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Notificar despliegue exitoso
+        if: steps.ml-scan.outputs.vulnerable != 'true'
+        run: |
+          curl -s -X POST "${{ secrets.TELEGRAM_API_URL }}" \
+            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d "text=Despliegue en producción exitoso. URL: ${{ secrets.APP_URL }}"

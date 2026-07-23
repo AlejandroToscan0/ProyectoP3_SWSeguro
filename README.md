@@ -29,7 +29,6 @@ Este servicio funciona como "puerta maestra" de seguridad para:
 - CRUD completo de usuarios, roles, módulos y menús
 - Menú dinámico recursivo por rol
 - Frontend SPA
-- CI/CD completo (SAST, SonarCloud, notificaciones)
 
 ## Arquitectura de alto nivel
 
@@ -76,6 +75,9 @@ ProyectoP3_SWSeguro/
 ├── src/
 │   ├── app.ts
 │   ├── server.ts
+│   ├── ai_model/
+│   │   ├── index.ts
+│   │   └── loader.ts
 │   ├── common/
 │   │   └── http-error.ts
 │   ├── config/
@@ -96,13 +98,15 @@ ProyectoP3_SWSeguro/
 │   ├── schema.prisma
 │   └── seed.ts
 ├── scripts/
-│   └── smoke-test.mjs
+│   ├── smoke-test.mjs
+│   └── sast_scan.py
 ├── test/
 │   ├── auth.schemas.test.ts
 │   └── auth.service.test.ts
 ├── .github/
 │   └── workflows/
-│       └── validate-source-branch.yml
+│       ├── validate-source-branch.yml
+│       └── ci-cd-pipeline.yml
 ├── docker-compose.yml
 ├── .env.example
 ├── package.json
@@ -261,6 +265,87 @@ curl -X POST http://localhost:3000/api/internals/validate-token \
 - Si aparece error de token, suele ser token incompleto, expirado o ya revocado.
 - Si aparece `401`, faltan credenciales o no son válidas.
 - Si aparece `403`, el usuario sí existe, pero no tiene permisos para esa acción.
+
+## Pipeline CI/CD y Despliegue
+
+El pipeline se activa automáticamente al hacer merge a `main` y ejecuta 4 fases secuenciales con notificaciones vía Telegram.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as Desarrollador
+    participant GH as GitHub
+    participant GHA as GitHub Actions (Runner)
+    participant SC as SonarCloud
+    participant ML as Modelo SAST (ML/Data Mining)
+    participant TG as Telegram API
+    participant RR as Railway / Render
+
+    Dev->>GH: Merge Pull Request a rama 'main'
+    GH->>GHA: Trigger Workflow (Solo en main)
+    GHA->>TG: "🚀 Pipeline iniciado en MAIN"
+    TG-->>Dev: Notificación recibida
+
+    rect rgb(255, 253, 230)
+    note over GHA: Fase 1: Build y Tests
+    GHA->>GHA: npm run build / npm run test
+    end
+
+    rect rgb(255, 253, 230)
+    note over GHA: Fase 2: Análisis Shift-Left (SonarCloud)
+    GHA->>SC: sonar-scanner
+    SC-->>GHA: Quality Gate PASSED/FAILED
+    end
+
+    alt Quality Gate FAILED
+        GHA->>TG: "❌ SonarCloud rechazó el código"
+        GHA-->>Dev: Job Failed (Se detiene el pipeline)
+    end
+
+    rect rgb(255, 253, 230)
+    note over GHA: Fase 3: SAST Avanzado (Modelo ML)
+    GHA->>ML: Ejecuta análisis con CodeBERT-VulnCWE
+    ML-->>GHA: 0 Anomalías detectadas
+    end
+
+    alt Vulnerabilidad detectada por ML
+        GHA->>TG: "⚠️ ALERTA: Modelo ML detectó patrón sospechoso"
+        GHA-->>Dev: Job Failed (Se detiene el pipeline)
+    end
+
+    rect rgb(255, 253, 230)
+    note over GHA: Fase 4: Despliegue (Zero Trust Pipeline)
+    GHA->>TG: "🚀 Seguridad validada. Desplegando..."
+    GHA->>RR: railway up
+    RR-->>GHA: Deploy Successful
+    GHA->>TG: "🎉 Despliegue en producción exitoso"
+    TG-->>Dev: Notificación de éxito
+    end
+```
+
+### Fases del pipeline
+
+| Fase | Descripción |
+|---|---|
+| **1. Build y Tests** | Compila TypeScript y ejecuta pruebas unitarias |
+| **2. SonarCloud** | Análisis estático Shift-Left con Quality Gate |
+| **3. Modelo ML** | SAST avanzado con `mahdin70/CodeBERT-VulnCWE` sobre archivos `.py` y `.ts` |
+| **4. Despliegue** | Zero Trust deployment en Railway |
+
+Si SonarCloud o el modelo ML detectan anomalías, el pipeline se detiene y se notifica al equipo por Telegram.
+
+### Variables de entorno requeridas para CI/CD
+
+| Variable | Propósito |
+|---|---|
+| `TELEGRAM_API_URL` | URL de la API de Telegram para enviar mensajes |
+| `TELEGRAM_CHAT_ID` | ID del chat/grupo de Telegram |
+| `SONAR_TOKEN` | Token de autenticación de SonarCloud |
+| `RAILWAY_TOKEN` | Token de Railway para despliegue |
+| `RAILWAY_SERVICE` | Nombre del servicio en Railway |
+| `APP_URL` | URL pública de la aplicación desplegada |
+
+---
 
 ## Política de ramas (protección)
 
