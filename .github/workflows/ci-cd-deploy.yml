@@ -25,42 +25,51 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4.1.0
         with:
           node-version: 22
           cache: npm
 
       - name: Instalar dependencias Master
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Generar cliente Prisma
         run: npm run prisma:generate
 
       - name: Instalar dependencias Frontend
-        run: npm --prefix frontend ci
+        run: npm --prefix frontend ci --ignore-scripts
 
       - name: Instalar dependencias Ventas
-        run: npm --prefix services/ventas ci
+        run: npm --prefix services/ventas ci --ignore-scripts
 
       - name: Notificar inicio del pipeline en main
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
-          curl -sS -X POST "$URL" \
-            -d "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=🚀 Pipeline iniciado en MAIN
-          PR: #${{ github.event.pull_request.number }}
-          Autor: ${{ github.event.pull_request.user.login }}
-          Commit: ${{ github.sha }}"
+          python3 <<'PY'
+          import os, urllib.parse, urllib.request
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          api = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+          text = (
+              "🚀 Pipeline iniciado en MAIN\n"
+              f"PR: #{os.environ.get('PR_NUMBER','')}\n"
+              f"Autor: {os.environ.get('PR_AUTHOR','')}\n"
+              f"Commit: {os.environ.get('COMMIT_SHA','')}"
+          )
+          data = urllib.parse.urlencode({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text}).encode()
+          urllib.request.urlopen(urllib.request.Request(api, data=data, method="POST"), timeout=30).read()
+          PY
 
       - name: Build Master
         run: npm run build
@@ -75,10 +84,14 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
         run: |
-          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
-          curl -sS -X POST "$URL" \
-            -d "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=✅ Build y pruebas unitarias OK en MAIN"
+          python3 <<'PY'
+          import os, urllib.parse, urllib.request
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          api = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+          text = "✅ Build y pruebas unitarias OK en MAIN"
+          data = urllib.parse.urlencode({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text}).encode()
+          urllib.request.urlopen(urllib.request.Request(api, data=data, method="POST"), timeout=30).read()
+          PY
 
       - name: Build Frontend
         run: npm run frontend:build
@@ -87,19 +100,24 @@ jobs:
         run: npm run ventas:build
 
       - name: Preparar sonar-project.properties
+        env:
+          SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
+          SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
         run: |
-          cat > sonar-project.properties <<EOF
-          sonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
-          sonar.organization=${{ secrets.SONAR_ORGANIZATION }}
-          sonar.sources=src
-          sonar.tests=test
-          sonar.sourceEncoding=UTF-8
-          sonar.exclusions=**/node_modules/**,**/dist/**,frontend/**,services/**,**/*.test.ts
-          sonar.test.inclusions=test/**/*.ts
-          sonar.qualitygate.wait=true
-          EOF
-          # Quitar indentación accidental del bloque YAML
-          sed -i 's/^[[:space:]]*//' sonar-project.properties
+          python3 <<'PY'
+          import os
+          lines = [
+              f"sonar.projectKey={os.environ['SONAR_PROJECT_KEY']}",
+              f"sonar.organization={os.environ['SONAR_ORGANIZATION']}",
+              "sonar.sources=src",
+              "sonar.tests=test",
+              "sonar.sourceEncoding=UTF-8",
+              "sonar.exclusions=**/node_modules/**,**/dist/**,frontend/**,services/**,**/*.test.ts",
+              "sonar.test.inclusions=test/**/*.ts",
+              "sonar.qualitygate.wait=true",
+          ]
+          open("sonar-project.properties", "w", encoding="utf-8").write("\n".join(lines) + "\n")
+          PY
 
       - name: SonarCloud Scan + Quality Gate
         id: sonar
@@ -114,21 +132,25 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
         run: |
-          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
-          curl -sS -X POST "$URL" \
-            -d "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=✅ SonarCloud Quality Gate OK en MAIN"
+          python3 <<'PY'
+          import os, urllib.parse, urllib.request
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          api = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+          text = "✅ SonarCloud Quality Gate OK en MAIN"
+          data = urllib.parse.urlencode({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text}).encode()
+          urllib.request.urlopen(urllib.request.Request(api, data=data, method="POST"), timeout=30).read()
+          PY
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.3.0
         with:
           python-version: "3.11"
 
       - name: Instalar dependencias Python (ML/SAST)
         run: |
-          pip install --upgrade pip
-          pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
-          pip install transformers sentencepiece
+          python -m pip install --upgrade pip
+          python -m pip install --only-binary=:all: --index-url https://download.pytorch.org/whl/cpu torch==2.5.1
+          python -m pip install --only-binary=:all: -r scripts/requirements-sast.txt
 
       - name: Análisis SAST avanzado (CodeBERT/ML)
         id: ml-scan
@@ -141,17 +163,23 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+          ML_VULNERABLE: ${{ steps.ml-scan.outputs.vulnerable }}
         run: |
-          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
-          if [ "${{ steps.ml-scan.outputs.vulnerable }}" = "true" ]; then
-            curl -sS -X POST "$URL" \
-              -d "chat_id=${TELEGRAM_CHAT_ID}" \
-              --data-urlencode "text=🚨 ALERTA: Modelo ML detectó patrones sospechosos. Deploy bloqueado."
-            exit 1
-          fi
-          curl -sS -X POST "$URL" \
-            -d "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=✅ Análisis ML/SAST sin hallazgos críticos"
+          python3 <<'PY'
+          import os, urllib.parse, urllib.request, sys
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          api = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+          vulnerable = os.environ.get("ML_VULNERABLE") == "true"
+          text = (
+              "🚨 ALERTA: Modelo ML detectó patrones sospechosos. Deploy bloqueado."
+              if vulnerable else
+              "✅ Análisis ML/SAST sin hallazgos críticos"
+          )
+          data = urllib.parse.urlencode({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text}).encode()
+          urllib.request.urlopen(urllib.request.Request(api, data=data, method="POST"), timeout=30).read()
+          if vulnerable:
+              sys.exit(1)
+          PY
 
       - name: Notificar inicio de despliegue
         env:
@@ -159,19 +187,24 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
         run: |
-          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
-          curl -sS -X POST "$URL" \
-            -d "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=📦 Seguridad validada. Desplegando a Railway vía CLI..."
+          python3 <<'PY'
+          import os, urllib.parse, urllib.request
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          api = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+          text = "📦 Seguridad validada. Desplegando a Railway vía CLI..."
+          data = urllib.parse.urlencode({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text}).encode()
+          urllib.request.urlopen(urllib.request.Request(api, data=data, method="POST"), timeout=30).read()
+          PY
 
       - name: Desplegar en Railway (CLI)
         id: deploy
-        run: |
-          set -euo pipefail
-          npm install -g @railway/cli
-          railway up --service "${{ secrets.RAILWAY_SERVICE }}" --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVICE }}
+        run: |
+          set -euo pipefail
+          npm install -g --ignore-scripts @railway/cli@4.5.3
+          railway up --service "$RAILWAY_SERVICE" --detach
 
       - name: Notificar despliegue exitoso
         if: success()
@@ -179,12 +212,16 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+          APP_URL: ${{ secrets.APP_URL }}
         run: |
-          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
-          curl -sS -X POST "$URL" \
-            -d "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=✅ Despliegue en producción exitoso
-          URL: ${{ secrets.APP_URL }}"
+          python3 <<'PY'
+          import os, urllib.parse, urllib.request
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          api = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+          text = f"✅ Despliegue en producción exitoso\nURL: {os.environ.get('APP_URL','')}"
+          data = urllib.parse.urlencode({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text}).encode()
+          urllib.request.urlopen(urllib.request.Request(api, data=data, method="POST"), timeout=30).read()
+          PY
 
       - name: Notificar fallo del pipeline
         if: failure()
@@ -192,8 +229,13 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
-          curl -sS -X POST "$URL" \
-            -d "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=❌ Pipeline MAIN falló. Revisar Actions: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          python3 <<'PY'
+          import os, urllib.parse, urllib.request
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          api = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+          text = f"❌ Pipeline MAIN falló. Revisar Actions: {os.environ.get('RUN_URL','')}"
+          data = urllib.parse.urlencode({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text}).encode()
+          urllib.request.urlopen(urllib.request.Request(api, data=data, method="POST"), timeout=30).read()
+          PY

@@ -60,6 +60,10 @@ export function VentasPage() {
         navigate("/forbidden", { replace: true });
         return;
       }
+      if (err instanceof ApiError && err.status === 401) {
+        navigate(err.code === "TOKEN_EXPIRED" ? "/token-expired" : "/session-expired", { replace: true });
+        return;
+      }
       setError(err instanceof Error ? err.message : "No se pudo crear la venta");
     }
   }

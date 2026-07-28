@@ -326,6 +326,9 @@ export class MenuService {
         children: {
           where: { estado: Estado.ACTIVO },
         },
+        roleMenus: {
+          where: { estado: Estado.ACTIVO },
+        },
       },
     });
 
@@ -339,6 +342,13 @@ export class MenuService {
 
     if (menu.children.length > 0) {
       throw new HttpError(400, "MENU_HAS_ACTIVE_CHILDREN", "El menú tiene hijos activos");
+    }
+
+    if (menu.roleMenus.length > 0) {
+      await this.db.roleMenu.updateMany({
+        where: { menuId: id, estado: Estado.ACTIVO },
+        data: { estado: Estado.INACTIVO, actualizadoPor: deletedBy },
+      });
     }
 
     const deletedMenu = await this.db.menu.update({

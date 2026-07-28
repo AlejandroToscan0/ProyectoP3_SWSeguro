@@ -24,16 +24,16 @@ jobs:
           cache: npm
 
       - name: Instalar dependencias Master
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Generar cliente Prisma
         run: npm run prisma:generate
 
       - name: Instalar dependencias Frontend
-        run: npm --prefix frontend ci
+        run: npm --prefix frontend ci --ignore-scripts
 
       - name: Instalar dependencias Ventas
-        run: npm --prefix services/ventas ci
+        run: npm --prefix services/ventas ci --ignore-scripts
 
       - name: Build Master
         run: npm run build

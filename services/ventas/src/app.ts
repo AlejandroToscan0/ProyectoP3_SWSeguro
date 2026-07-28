@@ -9,7 +9,16 @@ export function createApp() {
   const app = express();
 
   app.use(helmet());
-  app.use(cors());
+  const allowedOrigins = (process.env.CORS_ORIGINS ?? "http://localhost:5173")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  app.use(
+    cors({
+      origin: allowedOrigins,
+      methods: ["GET", "POST", "OPTIONS"],
+    }),
+  );
   app.use(express.json({ limit: "50kb" }));
 
   app.get("/health", (_req, res) => {

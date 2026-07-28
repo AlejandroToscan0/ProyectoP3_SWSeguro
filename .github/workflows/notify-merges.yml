@@ -29,11 +29,23 @@ jobs:
           NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
+          python3 <<'PY'
+          import os
+          import urllib.parse
+          import urllib.request
 
-          curl -sS -X POST "$URL" \
-            -d "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=🔀 Merge exitoso a ${BASE}
-          Origen: ${HEAD}
-          PR #${NUMBER}: ${TITLE}
-          Autor: ${AUTHOR}"
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          chat_id = os.environ["TELEGRAM_CHAT_ID"]
+          api_url = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+
+          text = (
+              f"🔀 Merge exitoso a {os.environ.get('BASE', '')}\n"
+              f"Origen: {os.environ.get('HEAD', '')}\n"
+              f"PR #{os.environ.get('NUMBER', '')}: {os.environ.get('TITLE', '')}\n"
+              f"Autor: {os.environ.get('AUTHOR', '')}"
+          )
+          data = urllib.parse.urlencode({"chat_id": chat_id, "text": text}).encode()
+          req = urllib.request.Request(api_url, data=data, method="POST")
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              resp.read()
+          PY

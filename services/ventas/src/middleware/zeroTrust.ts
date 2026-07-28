@@ -128,11 +128,24 @@ export function requirePermissions(...required: string[]) {
         );
       }
 
+      if (
+        typeof payload.userId !== "string" ||
+        typeof payload.roleId !== "string" ||
+        typeof payload.roleName !== "string" ||
+        !Array.isArray(payload.permissions)
+      ) {
+        throw new HttpError(
+          503,
+          "MASTER_INVALID_RESPONSE",
+          "Respuesta inválida del Master Gateway al validar el token",
+        );
+      }
+
       req.auth = {
-        userId: payload.userId as string,
-        roleId: payload.roleId as string,
-        roleName: payload.roleName as string,
-        permissions: payload.permissions ?? [],
+        userId: payload.userId,
+        roleId: payload.roleId,
+        roleName: payload.roleName,
+        permissions: payload.permissions.filter((p): p is string => typeof p === "string"),
       };
 
       next();
