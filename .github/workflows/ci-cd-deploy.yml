@@ -38,6 +38,9 @@ jobs:
       - name: Instalar dependencias Master
         run: npm ci
 
+      - name: Generar cliente Prisma
+        run: npm run prisma:generate
+
       - name: Instalar dependencias Frontend
         run: npm --prefix frontend ci
 
