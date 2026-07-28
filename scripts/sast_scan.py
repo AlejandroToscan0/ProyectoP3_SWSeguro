@@ -44,8 +44,13 @@ def load_model():
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
     print(f"Cargando modelo {MODEL_NAME}...")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
+    # El modelo CodeBERT-VulnCWE publica código custom en Hugging Face;
+    # en CI no hay TTY, así que hay que confiar explícitamente en ese remote code.
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+    model = AutoModelForSequenceClassification.from_pretrained(
+        MODEL_NAME,
+        trust_remote_code=True,
+    )
     model.eval()
     return model, tokenizer
 
