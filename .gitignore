@@ -8,5 +8,3 @@ frontend/dist
 frontend/node_modules
 services/ventas/dist
 services/ventas/node_modules
-
-docs/
