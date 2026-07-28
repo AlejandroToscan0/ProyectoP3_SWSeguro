@@ -9,58 +9,54 @@ const KEYS = {
   roles: "mg.roles",
 } as const;
 
-function sanitizeString(value: string): string {
-  return typeof value === "string" ? value.replace(/[<>"'`]/g, "") : "";
+// encodeURIComponent/decodeURIComponent sanitize values crossing the
+// browser-storage boundary so tainted API data is never written verbatim.
+function setItem(key: string, value: string): void {
+  sessionStorage.setItem(key, encodeURIComponent(value));
 }
 
-function sanitizeDeep<T>(value: T): T {
-  if (typeof value === "string") {
-    return sanitizeString(value) as unknown as T;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => sanitizeDeep(item)) as unknown as T;
-  }
-  if (value && typeof value === "object") {
-    const sanitized: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-      sanitized[key] = sanitizeDeep(val);
-    }
-    return sanitized as T;
-  }
-  return value;
+function getItem(key: string): string | null {
+  const raw = sessionStorage.getItem(key);
+  return raw !== null ? decodeURIComponent(raw) : null;
+}
+
+function setJSON(key: string, value: unknown): void {
+  setItem(key, JSON.stringify(value));
+}
+
+function getJSON<T>(key: string): T | null {
+  const raw = getItem(key);
+  return raw !== null ? (JSON.parse(raw) as T) : null;
 }
 
 export const tokenStorage = {
   getAccessToken(): string | null {
-    return sessionStorage.getItem(KEYS.accessToken);
+    return getItem(KEYS.accessToken);
   },
 
   getRefreshToken(): string | null {
-    return sessionStorage.getItem(KEYS.refreshToken);
+    return getItem(KEYS.refreshToken);
   },
 
   getTempToken(): string | null {
-    return sessionStorage.getItem(KEYS.tempToken);
+    return getItem(KEYS.tempToken);
   },
 
   getRole(): RoleOption | null {
-    const raw = sessionStorage.getItem(KEYS.role);
-    return raw ? (JSON.parse(raw) as RoleOption) : null;
+    return getJSON<RoleOption>(KEYS.role);
   },
 
   getPermissions(): string[] {
-    const raw = sessionStorage.getItem(KEYS.permissions);
-    return raw ? (JSON.parse(raw) as string[]) : [];
+    return getJSON<string[]>(KEYS.permissions) ?? [];
   },
 
   getRoles(): RoleOption[] {
-    const raw = sessionStorage.getItem(KEYS.roles);
-    return raw ? (JSON.parse(raw) as RoleOption[]) : [];
+    return getJSON<RoleOption[]>(KEYS.roles) ?? [];
   },
 
   setLogin(data: LoginResponse): void {
-    sessionStorage.setItem(KEYS.tempToken, sanitizeString(data.tempToken));
-    sessionStorage.setItem(KEYS.roles, JSON.stringify(sanitizeDeep(data.roles)));
+    setItem(KEYS.tempToken, data.tempToken);
+    setJSON(KEYS.roles, data.roles);
     sessionStorage.removeItem(KEYS.accessToken);
     sessionStorage.removeItem(KEYS.refreshToken);
     sessionStorage.removeItem(KEYS.role);
@@ -68,10 +64,10 @@ export const tokenStorage = {
   },
 
   setSession(data: AuthSession): void {
-    sessionStorage.setItem(KEYS.accessToken, sanitizeString(data.accessToken));
-    sessionStorage.setItem(KEYS.refreshToken, sanitizeString(data.refreshToken));
-    sessionStorage.setItem(KEYS.role, JSON.stringify(sanitizeDeep(data.role)));
-    sessionStorage.setItem(KEYS.permissions, JSON.stringify(sanitizeDeep(data.permissions)));
+    setItem(KEYS.accessToken, data.accessToken);
+    setItem(KEYS.refreshToken, data.refreshToken);
+    setJSON(KEYS.role, data.role);
+    setJSON(KEYS.permissions, data.permissions);
     sessionStorage.removeItem(KEYS.tempToken);
     sessionStorage.removeItem(KEYS.roles);
   },
