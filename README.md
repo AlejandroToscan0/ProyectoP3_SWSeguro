@@ -25,9 +25,14 @@ El Master Gateway actúa como puerta maestra de seguridad para:
 
 ### Destacados recientes
 
-- Administración dinámica de **roles** y **usuarios** desde la SPA (plantillas VENDEDOR/AUDITOR)
+- **Incorporación de módulos** desde la SPA: `baseUrl`, `healthPath`, menús jerárquicos, permisos `{MODULO}_READ` / `_CREATE` y desincorporación
+- **Reservas** como módulo hijo demo (`http://localhost:3002`): apartados Resumen / Hoteles / Huéspedes / Reservaciones con navegación por menús del rol
+- **Workspace de módulo** (`ModuleWorkspace`): pestañas internas según menús asignados + UI alineada al shell
+- **Cambio de rol en sesión**: `POST /api/auth/switch-role` + selector en el lateral (JWT nuevo solo con permisos del rol activo)
+- **Menú lateral filtrado** por `RoleMenu` + `RoleModule` + permiso de lectura (no muestra opciones a las que el rol no tiene acceso)
+- Administración dinámica de **roles** y **usuarios** (plantillas VENDEDOR/AUDITOR)
 - Selector de rol con **Cancelar / otro usuario**
-- `GET /api/menus/tree` disponible para cualquier sesión autenticada (navegación por rol; `MENUS_READ` solo para CRUD)
+- `GET /api/menus/tree` para cualquier sesión autenticada (navegación por rol; `MENUS_READ` solo para CRUD)
 - Seed demo: roles `VENDEDOR` / `AUDITOR` + usuarios de prueba
 - Documentación en `docs/` (DevSecOps, checklist, informe LaTeX)
 
@@ -38,6 +43,7 @@ flowchart LR
     U[Usuario / Frontend SPA] --> MG[Master Gateway API]
     MG --> DB[(PostgreSQL)]
     SPA[SPA React] --> V[Microservicio Ventas]
+    SPA --> R[Microservicio Reservas]
     V -->|x-internal-api-key + Bearer token| MG
     V -->|solo si token válido| BUS[Lógica de negocio]
 ```
@@ -55,9 +61,12 @@ flowchart TD
     G --> H{Rol pertenece al usuario y está activo}
     H -- No --> I[403 Rol no permitido]
     H -- Sí --> J[accessToken + refreshToken + permisos del rol]
+    J --> K{Cambio de rol en sesión}
+    K --> L[POST /api/auth/switch-role]
+    L --> M[Nuevo JWT solo con permisos del rol elegido]
 ```
 
-El JWT definitivo **no** incluye todos los roles del usuario: solo el rol activo y sus permisos.
+El JWT definitivo **no** incluye todos los roles del usuario: solo el rol activo y sus permisos. Un usuario puede tener varios roles asignados y cambiar entre ellos sin volver a autenticarse.
 
 ## Flujo de renovación y cierre de sesión
 
@@ -141,7 +150,23 @@ cp services/ventas/.env.example services/ventas/.env
 # INTERNAL_API_KEY debe coincidir con el Master
 ```
 
-**Nota:** el Postgres de Docker usa el puerto host **5433** (`localhost:5433`) para no chocar con un Postgres local en `5432`.
+### Reservas (opcional, proyecto hermano)
+
+El microservicio hotel/reservas vive fuera de este repo (`proyecto-reservas`), típico en:
+
+- API: `http://localhost:3002`
+- Postgres demo: puerto host **5434**
+
+En la SPA (como ADMIN):
+
+1. **Módulos** → incorporar **Reservas** (`baseUrl=http://localhost:3002`, `healthPath=/api/stats`)
+2. Asignar módulo + menús al rol + permiso `RESERVAS_READ`
+3. Botón **Crear apartados Reservas** (Resumen, Hoteles, Huéspedes, Reservaciones)
+4. Abrir el módulo desde el menú lateral; la barra de apartados sigue los menús del rol
+
+Variable opcional SPA: `VITE_RESERVAS_URL` (default `http://localhost:3002`).
+
+**Nota:** el Postgres de Docker del Master usa el puerto host **5433** (`localhost:5433`) para no chocar con un Postgres local en `5432`.
 
 Apagar DB:
 
@@ -159,15 +184,25 @@ npm run db:down
 
 Regenerar solo demos: `npm run seed:demo-roles`
 
-## Frontend SPA (`http://localhost:5173`)
+## Frontend SPA (`http://127.0.0.1:5173`)
 
 1. Login
 2. Selección obligatoria de rol (puedes **Cancelar / otro usuario**)
-3. Menú dinámico según rol (CTE filtrada por JWT)
-4. **Roles**: crear, plantillas, asignar usuarios/permisos/módulos/menús
-5. **Usuarios**: alta rápida con rol inicial
-6. **Ventas** (si el rol tiene permisos)
-7. Logout / pantallas 403, sesión o token expirado
+3. Menú dinámico según rol (solo opciones con menú + módulo + permiso de lectura)
+4. **Cambiar rol** en el lateral si el usuario tiene 2+ roles (sin re-login)
+5. **Roles**: crear, plantillas, asignar usuarios/permisos/módulos/menús  
+   - Los menús ofrecidos son solo de módulos ya asignados al rol
+6. **Usuarios**: alta rápida con rol inicial
+7. **Módulos**: incorporar servicio, salud, menús hijo, permisos del módulo
+8. **Ventas** / **Reservas** según permisos del rol activo
+9. Logout / pantallas 403, sesión o token expirado
+
+### Asignar varios roles a un usuario
+
+1. Entra como ADMIN → **Roles**
+2. Elige p. ej. VENDEDOR → asigna el usuario
+3. Repite con AUDITOR (u otro rol)
+4. Al login verá el selector; dentro de la sesión puede usar **Cambiar rol**
 
 Más detalle: `frontend/README.md` y `services/ventas/README.md`.
 
@@ -178,6 +213,8 @@ Más detalle: `frontend/README.md` y `services/ventas/README.md`.
 - `GET /health`
 - `POST /api/auth/login`
 - `POST /api/auth/select-role`
+- `POST /api/auth/switch-role` (sesión autenticada; rota contexto al nuevo rol)
+- `GET /api/auth/my-roles` (roles activos del usuario autenticado)
 - `POST /api/auth/refresh-token`
 - `POST /api/auth/logout`
 - `POST /api/internals/validate-token`
@@ -187,15 +224,30 @@ Más detalle: `frontend/README.md` y `services/ventas/README.md`.
 - CRUD `/api/users`
 - CRUD `/api/roles` + assign `users` / `modules` / `menus` / `permissions`
 - `GET /api/roles/{id}` (detalle con asignaciones)
-- CRUD `/api/modules`
-- CRUD `/api/menus` + `GET /api/menus/tree`
-- `GET /api/permissions`
+- CRUD `/api/modules` (incluye `baseUrl` / `healthPath`)
+- CRUD `/api/menus` + `GET /api/menus/tree` (árbol filtrado por rol/módulo/permiso)
+- `GET` / `POST` `/api/permissions`
 
 ### Ventas (puerto 3001)
 
 - `GET /api/ventas` → `VENTAS_READ`
 - `POST /api/ventas` → `VENTAS_CREATE`
 
+### Reservas (puerto 3002, externo)
+
+- `GET /api/hotels`, `/api/guests`, `/api/reservations`, `/api/stats`
+- Visibles en SPA con permiso `RESERVAS_READ` y menús asignados
+
+## Puertos locales
+
+| Servicio | Puerto |
+| --- | --- |
+| Master Gateway | `3000` |
+| Ventas | `3001` |
+| Reservas (hermano) | `3002` |
+| SPA Vite | `5173` (`127.0.0.1`) |
+| Postgres Master (Docker) | `5433` |
+| Postgres Reservas (demo) | `5434` |
 ## Pruebas
 
 ```bash
@@ -315,9 +367,10 @@ pandoc docs/informe_proyecto.tex -o informe.docx
 
 1. `npm run build && npm run test && npm run frontend:build && npm run ventas:build`
 2. `npm run db:up && npm run db:reset && npm run smoke`
-3. SPA: login → select-role (probar VENDEDOR) → Ventas → cancelar selector / logout
-4. Secrets Actions + branch protection + Telegram en un merge a `dev`
-5. URL pública en Railway (si aplica) + `/health`
+3. SPA: login → select-role (probar VENDEDOR) → Ventas → **Cambiar rol** a ADMIN → Reservas
+4. Incorporar/apartados de módulo desde **Módulos** y verificar que el lateral solo muestra lo permitido
+5. Secrets Actions + branch protection + Telegram en un merge a `dev`
+6. URL pública en Railway (si aplica) + `/health`
 
 ## Seguridad en desarrollo
 

@@ -438,4 +438,38 @@ export class RoleService {
       },
     });
   }
+
+  async removePermission(roleId: string, permissionId: string, removedBy: string): Promise<void> {
+    const assignment = await this.db.rolePermission.findUnique({
+      where: {
+        roleId_permissionId: {
+          roleId,
+          permissionId,
+        },
+      },
+      include: { permission: true },
+    });
+
+    if (!assignment || assignment.estado !== Estado.ACTIVO) {
+      throw new HttpError(404, "ROLE_PERMISSION_NOT_FOUND", "El rol no tiene este permiso activo");
+    }
+
+    await this.db.rolePermission.update({
+      where: { id: assignment.id },
+      data: {
+        estado: Estado.INACTIVO,
+        actualizadoPor: removedBy,
+      },
+    });
+
+    await this.db.auditLog.create({
+      data: {
+        roleId,
+        action: AuditAction.PERMISSIONS_CHANGED,
+        detail: `Permiso removido: ${assignment.permission.codigo}`,
+        creadoPor: removedBy,
+        actualizadoPor: removedBy,
+      },
+    });
+  }
 }

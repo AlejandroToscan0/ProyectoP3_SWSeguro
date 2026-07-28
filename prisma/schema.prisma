@@ -106,6 +106,10 @@ model Module {
   id                String       @id @default(uuid())
   nombre            String       @unique
   descripcion       String?
+  /// URL base del microservicio hijo (ej. http://localhost:3002)
+  baseUrl           String?
+  /// Ruta de health check relativa a baseUrl (ej. /health o /api/stats)
+  healthPath        String?
   estado            Estado       @default(ACTIVO)
   fechaCreacion     DateTime     @default(now())
   fechaActualizacion DateTime    @updatedAt

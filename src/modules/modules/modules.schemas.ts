@@ -1,13 +1,43 @@
 import { z } from "zod";
 
+const nullableUrl = z
+  .union([z.string().trim().url().max(500), z.literal(""), z.null()])
+  .optional()
+  .transform((value) => {
+    if (value === undefined) return undefined;
+    if (value === "" || value === null) return null;
+    return value;
+  });
+
+const nullableHealthPath = z
+  .union([
+    z
+      .string()
+      .trim()
+      .max(200)
+      .regex(/^\/.*/, "healthPath debe empezar con /"),
+    z.literal(""),
+    z.null(),
+  ])
+  .optional()
+  .transform((value) => {
+    if (value === undefined) return undefined;
+    if (value === "" || value === null) return null;
+    return value;
+  });
+
 export const createModuleSchema = z.object({
   nombre: z.string().trim().min(1).max(100),
   descripcion: z.string().trim().max(500).optional(),
+  baseUrl: nullableUrl,
+  healthPath: nullableHealthPath,
 });
 
 export const updateModuleSchema = z.object({
   nombre: z.string().trim().min(1).max(100).optional(),
-  descripcion: z.string().trim().max(500).optional(),
+  descripcion: z.string().trim().max(500).nullable().optional(),
+  baseUrl: nullableUrl,
+  healthPath: nullableHealthPath,
 });
 
 export const assignModuleToRoleSchema = z.object({

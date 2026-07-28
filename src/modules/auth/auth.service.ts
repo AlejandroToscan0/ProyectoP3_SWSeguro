@@ -9,6 +9,7 @@ import type {
   LogoutInput,
   RefreshTokenInput,
   SelectRoleInput,
+  SwitchRoleInput,
   ValidateTokenInput,
 } from "./auth.schemas.js";
 
@@ -30,6 +31,7 @@ type SelectRoleResponse = {
     nombre: string;
   };
   permissions: string[];
+  roles?: SafeRole[];
 };
 
 type RefreshResponse = {
@@ -194,7 +196,107 @@ export class AuthService {
         nombre: userRole.role.nombre,
       },
       permissions,
+      roles: await this.listActiveRoles(userId),
     };
+  }
+
+  async switchRole(
+    userId: string,
+    currentRoleId: string,
+    input: SwitchRoleInput,
+    meta?: { ip?: string | undefined; userAgent?: string | undefined },
+  ): Promise<SelectRoleResponse> {
+    if (input.roleId === currentRoleId) {
+      throw new HttpError(400, "ROLE_ALREADY_ACTIVE", "Ese rol ya está activo en la sesión");
+    }
+
+    const userRole = await this.db.userRole.findFirst({
+      where: {
+        userId,
+        roleId: input.roleId,
+        estado: Estado.ACTIVO,
+        role: { estado: Estado.ACTIVO },
+        user: { estado: Estado.ACTIVO },
+      },
+      include: {
+        role: true,
+      },
+    });
+
+    if (!userRole) {
+      throw new HttpError(403, "ROLE_NOT_ALLOWED", "El rol seleccionado no está asignado a este usuario");
+    }
+
+    const rolePermissions = await this.db.rolePermission.findMany({
+      where: {
+        roleId: userRole.role.id,
+        estado: Estado.ACTIVO,
+        permission: { estado: Estado.ACTIVO },
+      },
+      include: {
+        permission: true,
+      },
+    });
+
+    const permissions = rolePermissions.map((rp: { permission: { codigo: string } }) => rp.permission.codigo);
+    const session = await this.issueSession(userId, userRole.role.id, userRole.role.nombre, permissions);
+
+    if (input.refreshToken) {
+      try {
+        const { tokenId } = this.parseRefreshToken(input.refreshToken);
+        await this.db.refreshToken.updateMany({
+          where: {
+            id: tokenId,
+            userId,
+            revocado: false,
+          },
+          data: {
+            revocado: true,
+            reemplazadoPor: session.refreshTokenId,
+            actualizadoPor: userId,
+          },
+        });
+      } catch {
+        // Si el refresh previo no es válido, igual emitimos la nueva sesión.
+      }
+    }
+
+    await this.logAudit({
+      userId,
+      roleId: userRole.role.id,
+      action: AuditAction.ROLE_SELECTED,
+      detail: `Cambio de rol en sesión: ${userRole.role.nombre}`,
+      ipAddress: meta?.ip,
+      userAgent: meta?.userAgent,
+    });
+
+    return {
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
+      role: {
+        id: userRole.role.id,
+        nombre: userRole.role.nombre,
+      },
+      permissions,
+      roles: await this.listActiveRoles(userId),
+    };
+  }
+
+  async listActiveRoles(userId: string): Promise<SafeRole[]> {
+    const userRoles = await this.db.userRole.findMany({
+      where: {
+        userId,
+        estado: Estado.ACTIVO,
+        role: { estado: Estado.ACTIVO },
+      },
+      include: { role: true },
+      orderBy: { role: { nombre: "asc" } },
+    });
+
+    return userRoles.map((item) => ({
+      id: item.role.id,
+      nombre: item.role.nombre,
+    }));
   }
 
   async refreshToken(

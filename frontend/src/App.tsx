@@ -9,6 +9,7 @@ import { UsersPage } from "./pages/UsersPage";
 import { RolesPage } from "./pages/RolesPage";
 import { ModulesPage, MenusAdminPage } from "./pages/ModulesMenusPages";
 import { VentasPage } from "./pages/VentasPage";
+import { ReservasPage } from "./pages/ReservasPage";
 import { DynamicModulePage } from "./pages/DynamicModulePage";
 import { ForbiddenPage, SessionExpiredPage, TokenExpiredPage } from "./pages/StatusPages";
 
@@ -33,6 +34,7 @@ export default function App() {
               <Route path="modulos" element={<ModulesPage />} />
               <Route path="menus" element={<MenusAdminPage />} />
               <Route path="ventas" element={<VentasPage />} />
+              <Route path="reservas/*" element={<ReservasPage />} />
               <Route path="*" element={<DynamicModulePage />} />
             </Route>
           </Route>

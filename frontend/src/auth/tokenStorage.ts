@@ -63,13 +63,19 @@ export const tokenStorage = {
     sessionStorage.removeItem(KEYS.permissions);
   },
 
-  setSession(data: AuthSession): void {
+  setSession(data: AuthSession & { roles?: RoleOption[] }): void {
     setItem(KEYS.accessToken, data.accessToken);
     setItem(KEYS.refreshToken, data.refreshToken);
     setJSON(KEYS.role, data.role);
     setJSON(KEYS.permissions, data.permissions);
+    if (data.roles && data.roles.length > 0) {
+      setJSON(KEYS.roles, data.roles);
+    }
     sessionStorage.removeItem(KEYS.tempToken);
-    sessionStorage.removeItem(KEYS.roles);
+  },
+
+  setAvailableRoles(roles: RoleOption[]): void {
+    setJSON(KEYS.roles, roles);
   },
 
   clear(): void {

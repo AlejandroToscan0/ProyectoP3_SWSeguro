@@ -32,6 +32,8 @@ export async function seedDemoRoles(db: PrismaClientType = defaultPrisma) {
     "MENUS_READ",
     "VENTAS_READ",
     "VENTAS_CREATE",
+    "RESERVAS_READ",
+    "RESERVAS_CREATE",
   ]) {
     const permission = await db.permission.upsert({
       where: { codigo },
