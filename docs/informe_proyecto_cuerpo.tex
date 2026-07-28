@@ -1,0 +1,85 @@
+% Cuerpo del informe (sin preámbulo) para incorporar en otro documento LaTeX:
+%   \input{docs/informe_proyecto_cuerpo}
+% Requiere en el documento padre (según uso): babel spanish, booktabs, listings,
+% enumitem, hyperref (opcionales pero recomendados).
+
+\section{Introducción}
+El proyecto académico \emph{Sistema de Autenticación y Autorización Centralizado
+(Master Gateway)} responde a la necesidad de una puerta maestra de seguridad
+para arquitecturas de microservicios. En lugar de que cada servicio gestione
+usuarios y credenciales, el Master autentica usuarios, obliga a seleccionar un
+rol activo, emite JWT con privilegio mínimo, expone validación interna Zero Trust
+para microservicios hijos y administra usuarios, roles, módulos, menús y permisos
+con soft delete y auditoría.
+
+Principios rectores: Zero Trust, Least Privilege, Shift-Left Security,
+autenticación stateless y soft delete.
+
+\section{Objetivos}
+\begin{enumerate}
+  \item Implementar el flujo login $\rightarrow$ TempToken $\rightarrow$ selección de rol
+        $\rightarrow$ AccessToken + RefreshToken rotativo.
+  \item Modelar entidades con auditoría y estado ACTIVO/INACTIVO.
+  \item Generar menú dinámico con CTE recursiva filtrado por rol JWT.
+  \item Integrar un microservicio hijo (Ventas) bajo Zero Trust.
+  \item Entregar SPA con rutas protegidas y navegación dinámica.
+  \item Automatizar calidad y despliegue (GitHub Actions, SonarCloud, SAST/ML, Railway, Telegram).
+\end{enumerate}
+
+\section{Arquitectura del sistema}
+\subsection{Vista lógica}
+\begin{enumerate}
+  \item \textbf{Master Gateway}: API Node.js/TypeScript (auth, RBAC, CRUD, validate-token).
+  \item \textbf{PostgreSQL} vía Prisma ORM.
+  \item \textbf{SPA React + Vite}: login, selector de rol, administración y Ventas.
+  \item \textbf{Microservicio Ventas}: sin DB de usuarios; valida tokens en el Master.
+\end{enumerate}
+
+\subsection{Flujo Zero Trust}
+El frontend envía el AccessToken a Ventas; Ventas llama a
+\texttt{POST /api/internals/validate-token} con \texttt{x-internal-api-key}.
+Solo si el Master confirma validez y permisos se ejecuta la lógica de negocio.
+
+\subsection{Stack}
+Master: Express, TypeScript, Prisma, Argon2, Jose (JWT), Helmet, Zod.
+Frontend: React 19, Vite, React Router.
+CI/CD: GitHub Actions, SonarCloud, SAST/ML, Railway CLI, Telegram.
+
+\section{Modelo de datos}
+Entidades: User, Role, UserRole, Module, RoleModule, Menu (Adjacency List),
+RoleMenu, Permission, RolePermission, RefreshToken, TokenRevocation, AuditLog.
+Menú: solo hojas con URL, anticiclos, exclusión de inactivos.
+
+\section{Autenticación y autorización}
+Login emite TempToken + roles; la SPA fuerza select-role; el AccessToken incluye
+únicamente el rol seleccionado y sus permisos. Refresh rotativo y logout con
+revocación por \texttt{jti}. Endpoint interno
+\texttt{/api/internals/validate-token} responde
+\texttt{active}, \texttt{userId}, \texttt{roleId}, \texttt{roleName}, \texttt{permissions}.
+
+\section{Frontend}
+SPA con sessionStorage, interceptor Bearer/refresh, menú dinámico, administración
+de usuarios/roles, pantallas 403/sesión/token expirado y cancelación del selector
+de rol para cambiar de usuario. La UI no decide autorización final.
+
+\section{Microservicio Ventas}
+Endpoints con permisos \texttt{VENTAS\_READ}/\texttt{VENTAS\_CREATE}; retries ante
+cold start PaaS. Roles demo: ADMIN, VENDEDOR, AUDITOR.
+
+\section{Seguridad}
+Argon2, rate limiting, Helmet, Zod, soft delete, secretos en entorno, mensajes
+de login genéricos. JWT HS256 + validate-token (RS256 opcional no bloqueante).
+
+\section{DevSecOps}
+Ramas \texttt{feature $\rightarrow$ dev $\rightarrow$ test $\rightarrow$ main}.
+Pipeline en merge a main: build/tests, Sonar Quality Gate obligatorio, SAST/ML,
+deploy Railway, Telegram. Despliegue recomendado: Railway (alternativa Render).
+
+\section{Pruebas}
+Vitest, smoke E2E (\texttt{npm run smoke}), checklist en
+\texttt{docs/COMPLIANCE\_CHECKLIST.md}.
+
+\section{Conclusiones}
+Se cumple el alcance académico Full-Stack seguro (Master + SPA + Ventas + DevSecOps).
+Pendiente operativo: secrets GitHub, branch protection, SonarCloud y PaaS.
+Mejora opcional: JWT asimétrico.

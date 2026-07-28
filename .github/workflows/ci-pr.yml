@@ -1,0 +1,47 @@
+name: CI en Pull Request
+
+# Validación Shift-Left en PRs hacia dev/test (sin deploy).
+
+on:
+  pull_request:
+    branches: [dev, test]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias Master
+        run: npm ci --ignore-scripts
+
+      - name: Generar cliente Prisma
+        run: npm run prisma:generate
+
+      - name: Instalar dependencias Frontend
+        run: npm --prefix frontend ci --ignore-scripts
+
+      - name: Instalar dependencias Ventas
+        run: npm --prefix services/ventas ci --ignore-scripts
+
+      - name: Build Master
+        run: npm run build
+
+      - name: Tests
+        run: npm run test
+
+      - name: Build Frontend
+        run: npm run frontend:build
+
+      - name: Build Ventas
+        run: npm run ventas:build

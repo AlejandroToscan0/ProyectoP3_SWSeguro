@@ -31,11 +31,9 @@ export class ModuleService {
     const where: {
       estado?: Estado;
       OR?: Array<{ nombre: { contains: string; mode: "insensitive" } } | { descripcion: { contains: string; mode: "insensitive" } }>;
-    } = {};
-
-    if (estado) {
-      where.estado = estado;
-    }
+    } = {
+      estado,
+    };
 
     if (search) {
       where.OR = [
@@ -149,7 +147,6 @@ export class ModuleService {
     const updateData: {
       nombre?: string;
       descripcion?: string | null;
-      estado?: Estado;
       actualizadoPor: string;
     } = {
       actualizadoPor: updatedBy,
@@ -157,7 +154,6 @@ export class ModuleService {
 
     if (input.nombre) updateData.nombre = input.nombre;
     if (input.descripcion !== undefined) updateData.descripcion = input.descripcion ?? null;
-    if (input.estado) updateData.estado = input.estado;
 
     const updatedModule = await this.db.module.update({
       where: { id },

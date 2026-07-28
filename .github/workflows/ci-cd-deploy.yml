@@ -1,0 +1,241 @@
+name: CI/CD Pipeline and Deploy
+
+# Se ejecuta solo cuando un PR se fusiona a main (desde test).
+# Secuencia: build → tests → SonarCloud (Quality Gate obligatorio) → SAST/ML → deploy Railway.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-cd-main
+  cancel-in-progress: false
+
+jobs:
+  ci-cd:
+    name: Build, Secure and Deploy
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias Master
+        run: npm ci --ignore-scripts
+
+      - name: Generar cliente Prisma
+        run: npm run prisma:generate
+
+      - name: Instalar dependencias Frontend
+        run: npm --prefix frontend ci --ignore-scripts
+
+      - name: Instalar dependencias Ventas
+        run: npm --prefix services/ventas ci --ignore-scripts
+
+      - name: Notificar inicio del pipeline en main
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import os, urllib.parse, urllib.request
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          api = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+          text = (
+              "🚀 Pipeline iniciado en MAIN\n"
+              f"PR: #{os.environ.get('PR_NUMBER','')}\n"
+              f"Autor: {os.environ.get('PR_AUTHOR','')}\n"
+              f"Commit: {os.environ.get('COMMIT_SHA','')}"
+          )
+          data = urllib.parse.urlencode({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text}).encode()
+          urllib.request.urlopen(urllib.request.Request(api, data=data, method="POST"), timeout=30).read()
+          PY
+
+      - name: Build Master
+        run: npm run build
+
+      - name: Tests unitarios
+        id: unit-tests
+        run: npm run test
+
+      - name: Notificar resultado de pruebas
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+        run: |
+          python3 <<'PY'
+          import os, urllib.parse, urllib.request
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          api = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+          text = "✅ Build y pruebas unitarias OK en MAIN"
+          data = urllib.parse.urlencode({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text}).encode()
+          urllib.request.urlopen(urllib.request.Request(api, data=data, method="POST"), timeout=30).read()
+          PY
+
+      - name: Build Frontend
+        run: npm run frontend:build
+
+      - name: Build microservicio Ventas
+        run: npm run ventas:build
+
+      - name: Preparar sonar-project.properties
+        env:
+          SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
+          SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
+        run: |
+          python3 <<'PY'
+          import os
+          lines = [
+              f"sonar.projectKey={os.environ['SONAR_PROJECT_KEY']}",
+              f"sonar.organization={os.environ['SONAR_ORGANIZATION']}",
+              "sonar.sources=src",
+              "sonar.tests=test",
+              "sonar.sourceEncoding=UTF-8",
+              "sonar.exclusions=**/node_modules/**,**/dist/**,frontend/**,services/**,**/*.test.ts",
+              "sonar.test.inclusions=test/**/*.ts",
+              "sonar.qualitygate.wait=true",
+          ]
+          open("sonar-project.properties", "w", encoding="utf-8").write("\n".join(lines) + "\n")
+          PY
+
+      - name: SonarCloud Scan + Quality Gate
+        id: sonar
+        uses: SonarSource/sonarcloud-github-action@eb211723266fe8e83102bac7361f0a05c3ac1d1b # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Notificar éxito Quality Gate SonarCloud
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+        run: |
+          python3 <<'PY'
+          import os, urllib.parse, urllib.request
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          api = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+          text = "✅ SonarCloud Quality Gate OK en MAIN"
+          data = urllib.parse.urlencode({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text}).encode()
+          urllib.request.urlopen(urllib.request.Request(api, data=data, method="POST"), timeout=30).read()
+          PY
+
+      - name: Setup Python
+        uses: actions/setup-python@v5.3.0
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias Python (ML/SAST)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --only-binary=:all: --index-url https://download.pytorch.org/whl/cpu torch==2.5.1
+          python -m pip install --only-binary=:all: -r scripts/requirements-sast.txt
+
+      - name: Análisis SAST avanzado (CodeBERT/ML)
+        id: ml-scan
+        run: python scripts/sast_scan.py
+        env:
+          ML_MODEL_NAME: ${{ vars.ML_MODEL_NAME || 'mahdin70/CodeBERT-VulnCWE' }}
+
+      - name: Notificar resultado SAST/ML
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+          ML_VULNERABLE: ${{ steps.ml-scan.outputs.vulnerable }}
+        run: |
+          python3 <<'PY'
+          import os, urllib.parse, urllib.request, sys
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          api = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+          vulnerable = os.environ.get("ML_VULNERABLE") == "true"
+          text = (
+              "🚨 ALERTA: Modelo ML detectó patrones sospechosos. Deploy bloqueado."
+              if vulnerable else
+              "✅ Análisis ML/SAST sin hallazgos críticos"
+          )
+          data = urllib.parse.urlencode({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text}).encode()
+          urllib.request.urlopen(urllib.request.Request(api, data=data, method="POST"), timeout=30).read()
+          if vulnerable:
+              sys.exit(1)
+          PY
+
+      - name: Notificar inicio de despliegue
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+        run: |
+          python3 <<'PY'
+          import os, urllib.parse, urllib.request
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          api = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+          text = "📦 Seguridad validada. Desplegando a Railway vía CLI..."
+          data = urllib.parse.urlencode({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text}).encode()
+          urllib.request.urlopen(urllib.request.Request(api, data=data, method="POST"), timeout=30).read()
+          PY
+
+      - name: Desplegar en Railway (CLI)
+        id: deploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVICE }}
+        run: |
+          set -euo pipefail
+          npm install -g --ignore-scripts @railway/cli@4.5.3
+          railway up --service "$RAILWAY_SERVICE" --detach
+
+      - name: Notificar despliegue exitoso
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+          APP_URL: ${{ secrets.APP_URL }}
+        run: |
+          python3 <<'PY'
+          import os, urllib.parse, urllib.request
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          api = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+          text = f"✅ Despliegue en producción exitoso\nURL: {os.environ.get('APP_URL','')}"
+          data = urllib.parse.urlencode({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text}).encode()
+          urllib.request.urlopen(urllib.request.Request(api, data=data, method="POST"), timeout=30).read()
+          PY
+
+      - name: Notificar fallo del pipeline
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 <<'PY'
+          import os, urllib.parse, urllib.request
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          api = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+          text = f"❌ Pipeline MAIN falló. Revisar Actions: {os.environ.get('RUN_URL','')}"
+          data = urllib.parse.urlencode({"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text}).encode()
+          urllib.request.urlopen(urllib.request.Request(api, data=data, method="POST"), timeout=30).read()
+          PY

@@ -1,0 +1,416 @@
+% =============================================================================
+% Informe técnico — Sistema Master Gateway
+% Uso:
+%   1) Compilar solo: pdflatex docs/informe_proyecto.tex
+%   2) Incorporar en otro documento:
+%        \input{docs/informe_proyecto_cuerpo}   % (si se separa el cuerpo)
+%      o copiar las secciones desde \section{Introducción} en adelante.
+% =============================================================================
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{setspace}
+
+\geometry{margin=2.5cm}
+\onehalfspacing
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=teal!60!black,
+  urlcolor=teal!60!black,
+  citecolor=teal!60!black
+}
+
+\definecolor{codebg}{RGB}{245,247,248}
+\lstset{
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{black!20},
+  columns=fullflexible
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Master Gateway --- Informe técnico}
+\fancyhead[R]{\small Desarrollo de Software Seguro}
+\fancyfoot[C]{\thepage}
+
+\title{%
+  Informe técnico del proyecto\\
+  \large Sistema de Autenticación y Autorización Centralizado\\
+  (Master Gateway)
+}
+\author{Equipo de desarrollo \\ Desarrollo de Software Seguro --- Parcial III}
+\date{\today}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+Este documento describe la arquitectura, el diseño de seguridad, los componentes
+implementados y la estrategia DevSecOps del \textbf{Master Gateway}: un
+microservicio maestro que centraliza autenticación, autorización basada en roles
+(RBAC), menú dinámico y validación Zero Trust para microservicios hijos.
+El sistema incluye una SPA React, un microservicio de Ventas y un pipeline
+CI/CD con SonarCloud, análisis SAST/ML, notificaciones Telegram y despliegue
+automático en Railway.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% -----------------------------------------------------------------------------
+\section{Introducción}
+% -----------------------------------------------------------------------------
+El proyecto académico \emph{Sistema de Autenticación y Autorización Centralizado
+(Master Gateway)} responde a la necesidad de una puerta maestra de seguridad
+para arquitecturas de microservicios. En lugar de que cada servicio gestione
+usuarios y credenciales, el Master:
+
+\begin{itemize}[leftmargin=1.5em]
+  \item autentica usuarios;
+  \item obliga a seleccionar un rol activo (workspace);
+  \item emite JWT con \textbf{privilegio mínimo} (solo el rol elegido y sus permisos);
+  \item expone validación interna para que los microservicios hijos verifiquen
+        tokens sin confiar en el frontend;
+  \item administra usuarios, roles, módulos, menús y permisos con soft delete y auditoría.
+\end{itemize}
+
+Principios rectores: \textbf{Zero Trust}, \textbf{Least Privilege},
+\textbf{Shift-Left Security}, autenticación \textbf{stateless} y
+\textbf{soft delete}.
+
+% -----------------------------------------------------------------------------
+\section{Objetivos}
+% -----------------------------------------------------------------------------
+\begin{enumerate}[leftmargin=1.5em]
+  \item Implementar el flujo login $\rightarrow$ TempToken $\rightarrow$ selección de rol
+        $\rightarrow$ AccessToken + RefreshToken rotativo.
+  \item Modelar entidades con auditoría y estado \texttt{ACTIVO}/\texttt{INACTIVO}.
+  \item Generar menú dinámico con CTE recursiva filtrado por rol JWT.
+  \item Integrar al menos un microservicio hijo (Ventas) bajo Zero Trust.
+  \item Entregar SPA con rutas protegidas y navegación dinámica.
+  \item Automatizar calidad y despliegue (GitHub Actions, SonarCloud, SAST/ML, Railway, Telegram).
+\end{enumerate}
+
+% -----------------------------------------------------------------------------
+\section{Arquitectura del sistema}
+% -----------------------------------------------------------------------------
+\subsection{Vista lógica}
+El sistema se compone de cuatro bloques principales:
+
+\begin{enumerate}[leftmargin=1.5em]
+  \item \textbf{Master Gateway (API Node.js/TypeScript)}: autenticación,
+        autorización, CRUD administrativo y endpoint interno de validación.
+  \item \textbf{PostgreSQL}: persistencia vía Prisma ORM.
+  \item \textbf{SPA (React + Vite)}: experiencia de usuario, selector de rol y
+        administración.
+  \item \textbf{Microservicio Ventas}: lógica de negocio sin base de usuarios;
+        valida cada petición contra el Master.
+\end{enumerate}
+
+\subsection{Flujo de confianza (Zero Trust)}
+\begin{enumerate}[leftmargin=1.5em]
+  \item El usuario se autentica en el Master mediante la SPA.
+  \item Tras seleccionar rol, la SPA obtiene un AccessToken.
+  \item Al invocar Ventas, la SPA envía \texttt{Authorization: Bearer <token>}.
+  \item Ventas \textbf{no confía} en el frontend: llama a
+        \texttt{POST /api/internals/validate-token} con
+        \texttt{x-internal-api-key} y el token del usuario.
+  \item Solo si el Master confirma validez y permisos, Ventas ejecuta la operación.
+\end{enumerate}
+
+\subsection{Stack tecnológico}
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Capa} & \textbf{Tecnología} \\
+\midrule
+Backend Master & Node.js, Express, TypeScript, Prisma, PostgreSQL \\
+Seguridad & Argon2, Jose (JWT HS256), Helmet, rate limit, Zod \\
+Frontend & React 19, Vite, React Router \\
+Microservicio & Express + validación vía Master \\
+CI/CD & GitHub Actions, SonarCloud, Python/ML SAST, Railway CLI, Telegram \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% -----------------------------------------------------------------------------
+\section{Modelo de datos}
+% -----------------------------------------------------------------------------
+Entidades principales (todas con auditoría: \texttt{fechaCreacion},
+\texttt{fechaActualizacion}, \texttt{creadoPor}, \texttt{actualizadoPor} y
+\texttt{estado}):
+
+\begin{itemize}[leftmargin=1.5em]
+  \item \textbf{User}, \textbf{Role}, \textbf{UserRole}
+  \item \textbf{Module}, \textbf{RoleModule}
+  \item \textbf{Menu} (Adjacency List: \texttt{parentId}, \texttt{orden}, \texttt{icono}, \texttt{url})
+  \item \textbf{RoleMenu}, \textbf{Permission}, \textbf{RolePermission}
+  \item \textbf{RefreshToken} (rotación / \texttt{reemplazadoPor})
+  \item \textbf{TokenRevocation} (logout e invalidación por \texttt{jti})
+  \item \textbf{AuditLog} (login, rol, refresh, logout, usuarios, permisos, intentos no autorizados)
+\end{itemize}
+
+Reglas de menú:
+\begin{itemize}[leftmargin=1.5em]
+  \item solo nodos hoja pueden tener URL;
+  \item se impiden ciclos en \texttt{parentId};
+  \item nodos inactivos (y módulos inactivos) se excluyen del árbol.
+\end{itemize}
+
+% -----------------------------------------------------------------------------
+\section{Autenticación y autorización}
+% -----------------------------------------------------------------------------
+\subsection{Flujo de autenticación}
+\begin{enumerate}[leftmargin=1.5em]
+  \item \texttt{POST /api/auth/login}: valida email/password (Argon2).
+        Respuesta: \texttt{tempToken} de corta duración + roles activos.
+  \item SPA muestra selector obligatorio de rol (no hay acceso directo al dashboard).
+  \item \texttt{POST /api/auth/select-role}: valida TempToken, pertenencia del rol
+        y estado activo. Emite:
+        \begin{itemize}
+          \item AccessToken JWT (vida corta);
+          \item RefreshToken rotativo;
+          \item rol activo y permisos.
+        \end{itemize}
+  \item \texttt{POST /api/auth/refresh-token}: rota el refresh; reutilización sospechosa
+        implica revocación.
+  \item \texttt{POST /api/auth/logout}: revoca refresh y registra \texttt{jti} del access.
+\end{enumerate}
+
+\subsection{Claims del AccessToken (Least Privilege)}
+El JWT definitivo \textbf{no} incluye todos los roles del usuario. Contiene, entre otros:
+\texttt{sub}, \texttt{roleId}, \texttt{roleName}, \texttt{permissions},
+\texttt{iss}, \texttt{aud}, \texttt{iat}, \texttt{exp}, \texttt{jti}, \texttt{type=access}.
+
+\subsection{Validación interna}
+\texttt{POST /api/internals/validate-token} (protegido por API key interna) responde:
+\begin{lstlisting}
+{
+  "active": true,
+  "userId": "...",
+  "roleId": "...",
+  "roleName": "VENDEDOR",
+  "permissions": ["VENTAS_READ", "VENTAS_CREATE"]
+}
+\end{lstlisting}
+Opcionalmente exige \texttt{requiredPermissions}.
+
+% -----------------------------------------------------------------------------
+\section{API del Master (resumen)}
+% -----------------------------------------------------------------------------
+\begin{center}
+\begin{tabular}{@{}p{6.2cm}p{7.5cm}@{}}
+\toprule
+\textbf{Grupo} & \textbf{Endpoints} \\
+\midrule
+Auth &
+\texttt{/api/auth/login}, \texttt{select-role}, \texttt{refresh-token}, \texttt{logout} \\
+Interno &
+\texttt{/api/internals/validate-token} \\
+Usuarios &
+CRUD \texttt{/api/users} \\
+Roles &
+CRUD \texttt{/api/roles}; asignación de users/modules/menus/permissions \\
+Módulos &
+CRUD \texttt{/api/modules} \\
+Menús &
+CRUD \texttt{/api/menus}; \texttt{GET /api/menus/tree} \\
+Permisos &
+\texttt{GET /api/permissions} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Nota de diseño: \texttt{GET /api/menus/tree} requiere sesión autenticada (rol en JWT)
+y \textbf{no} el permiso administrativo \texttt{MENUS\_READ}, porque el árbol es
+navegación por rol; \texttt{MENUS\_READ} queda para CRUD de menús.
+
+% -----------------------------------------------------------------------------
+\section{Frontend (SPA)}
+% -----------------------------------------------------------------------------
+La SPA implementa:
+\begin{itemize}[leftmargin=1.5em]
+  \item login y selector de rol con opción de cancelar / cambiar de usuario;
+  \item almacenamiento de tokens en \texttt{sessionStorage};
+  \item interceptor HTTP con Bearer y renovación de refresh;
+  \item rutas protegidas y pantallas de 403, sesión expirada y token expirado;
+  \item menú dinámico desde \texttt{/api/menus/tree};
+  \item administración de usuarios y roles (creación, plantillas VENDEDOR/AUDITOR,
+        asignación de permisos/módulos/menús/usuarios);
+  \item pantalla de Ventas integrada.
+\end{itemize}
+
+La UI \textbf{no} toma decisiones finales de autorización: solo refleja permisos;
+el backend siempre valida.
+
+% -----------------------------------------------------------------------------
+\section{Microservicio Ventas}
+% -----------------------------------------------------------------------------
+\begin{itemize}[leftmargin=1.5em]
+  \item Sin base de datos de usuarios (almacén en memoria para demo académica).
+  \item Endpoints: \texttt{GET /api/ventas} (\texttt{VENTAS\_READ}),
+        \texttt{POST /api/ventas} (\texttt{VENTAS\_CREATE}).
+  \item Middleware Zero Trust hacia el Master, con reintentos y backoff ante
+        cold start típico de PaaS free tier (\texttt{503 MASTER\_UNAVAILABLE}).
+\end{itemize}
+
+Roles demo sembrados:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Usuario} & \textbf{Rol} & \textbf{Enfoque} \\
+\midrule
+\texttt{admin@example.com} & ADMIN (+ VENDEDOR, AUDITOR) & administración completa \\
+\texttt{vendedor@example.com} & VENDEDOR & solo ventas \\
+\texttt{auditor@example.com} & AUDITOR & lectura \\
+\bottomrule
+\end{tabular}
+\end{center}
+Password demo: \texttt{ChangeMe123!} (debe cambiarse en producción).
+
+% -----------------------------------------------------------------------------
+\section{Seguridad aplicada}
+% -----------------------------------------------------------------------------
+\begin{itemize}[leftmargin=1.5em]
+  \item Hash de contraseñas con \textbf{Argon2}; nunca se expone \texttt{passwordHash}.
+  \item Validación de fortaleza de password; mensajes de login genéricos
+        (anti-enumeración).
+  \item Helmet, CORS controlado, límites de body JSON.
+  \item Rate limiting en login, refresh y validate-token.
+  \item Validación de entrada con Zod; prevención de mass-assignment de
+        \texttt{estado}.
+  \item Soft delete en entidades principales.
+  \item Secretos exclusivamente vía variables de entorno (\texttt{.env.example}).
+  \item JWT con issuer/audience/expiración/jti; revocación en logout.
+\end{itemize}
+
+Decisión aceptada: firma simétrica HS256 + validación centralizada
+(\texttt{validate-token}). El enunciado permite como alternativa RS256/ES256
+en microservicios hijos; no es bloqueante para el cumplimiento funcional.
+
+% -----------------------------------------------------------------------------
+\section{DevSecOps y despliegue}
+% -----------------------------------------------------------------------------
+\subsection{Estrategia de ramas}
+\begin{lstlisting}
+feature/*  ->  dev  ->  test  ->  main
+\end{lstlisting}
+Política automatizada: \texttt{main} solo desde \texttt{test}; \texttt{test} solo desde \texttt{dev}.
+
+\subsection{Pipeline (merge a main)}
+\begin{enumerate}[leftmargin=1.5em]
+  \item Instalación de dependencias, build y pruebas (Master, Frontend, Ventas).
+  \item SonarCloud con Quality Gate obligatorio (\texttt{sonar.qualitygate.wait=true}).
+  \item SAST adicional con modelo ML (CodeBERT-VulnCWE); hallazgos bloquean deploy.
+  \item Despliegue vía Railway CLI.
+  \item Notificaciones Telegram (inicio, pruebas, Sonar, ML, éxito/fallo, merges).
+\end{enumerate}
+
+\subsection{Despliegue recomendado}
+Plataforma alineada al proyecto: \textbf{Railway} (alternativa: Render).
+Servicios sugeridos: PostgreSQL + Master (+ Ventas + frontend estático).
+Documentación operativa: \texttt{docs/DEVSECOPS.md}.
+
+% -----------------------------------------------------------------------------
+\section{Pruebas y verificación}
+% -----------------------------------------------------------------------------
+\begin{itemize}[leftmargin=1.5em]
+  \item Pruebas unitarias con Vitest (suite del Master).
+  \item Smoke E2E: \texttt{npm run smoke} (login, select-role, refresh, validate, logout, rechazo de token revocado).
+  \item Verificación manual SPA: login $\rightarrow$ rol $\rightarrow$ Ventas $\rightarrow$ logout.
+  \item Matriz de cumplimiento: \texttt{docs/COMPLIANCE\_CHECKLIST.md}.
+\end{itemize}
+
+Arranque local típico:
+\begin{lstlisting}
+npm run db:up
+npm run db:reset
+npm run dev
+npm run ventas:dev
+npm run frontend:dev
+\end{lstlisting}
+Nota: PostgreSQL en Docker usa puerto host \textbf{5433} para no chocar con un Postgres local en 5432.
+
+% -----------------------------------------------------------------------------
+\section{Estructura del repositorio}
+% -----------------------------------------------------------------------------
+\begin{lstlisting}
+ProyectoP3_SWSeguro/
+  src/                 # Master Gateway
+  prisma/              # Schema, seed, seed demo roles
+  frontend/            # SPA React
+  services/ventas/     # Microservicio hijo
+  .github/workflows/   # CI/CD y políticas de rama
+  scripts/             # smoke + SAST ML
+  docs/                # DevSecOps, checklist, informe
+  README.md
+\end{lstlisting}
+
+% -----------------------------------------------------------------------------
+\section{Resultados y conclusiones}
+% -----------------------------------------------------------------------------
+Se entregó un sistema Full-Stack seguro coherente con el enunciado académico:
+Master Gateway como autoridad de identidad y autorización, SPA con selección
+obligatoria de rol, microservicio Ventas bajo Zero Trust y pipeline DevSecOps
+con controles Shift-Left.
+
+\begin{itemize}[leftmargin=1.5em]
+  \item \textbf{Cumplimiento funcional:} autenticación, RBAC, menú CTE, CRUD soft delete,
+        Ventas, SPA y CI/CD.
+  \item \textbf{Pendiente operativo (configuración externa):} secrets de GitHub,
+        branch protection, proyecto SonarCloud y servicio Railway/Render.
+  \item \textbf{Mejora opcional:} migración a JWT asimétrico (RS256/ES256) para
+        validación offline en hijos.
+\end{itemize}
+
+% -----------------------------------------------------------------------------
+\section{Anexos}
+% -----------------------------------------------------------------------------
+\subsection{A. Variables de entorno críticas (Master)}
+\begin{itemize}[leftmargin=1.5em]
+  \item \texttt{DATABASE\_URL}
+  \item \texttt{JWT\_ACCESS\_SECRET}, \texttt{JWT\_TEMP\_SECRET}
+  \item \texttt{INTERNAL\_API\_KEY}
+  \item \texttt{JWT\_ISSUER}, \texttt{JWT\_AUDIENCE}
+  \item TTL de access/temp/refresh
+\end{itemize}
+
+\subsection{B. Secrets de GitHub Actions (producción)}
+\begin{itemize}[leftmargin=1.5em]
+  \item \texttt{TELEGRAM\_BOT\_TOKEN}, \texttt{TELEGRAM\_CHAT\_ID}
+  \item \texttt{SONAR\_TOKEN}, \texttt{SONAR\_PROJECT\_KEY}, \texttt{SONAR\_ORGANIZATION}
+  \item \texttt{RAILWAY\_TOKEN}, \texttt{RAILWAY\_SERVICE}, \texttt{APP\_URL}
+\end{itemize}
+
+\subsection{C. Cómo incorporar este informe a otro documento \LaTeX}
+\begin{enumerate}[leftmargin=1.5em]
+  \item Opción simple: copiar desde \verb|\section{Introducción}| hasta el final
+        (sin \verb|\documentclass| ni \verb|\begin{document}|).
+  \item Opción modular: en el documento padre usar
+        \begin{lstlisting}
+\input{ruta/informe_proyecto_cuerpo}
+        \end{lstlisting}
+        tras mover el cuerpo a un archivo sin preámbulo.
+  \item Para Word/Google Docs: compilar a PDF y convertir, o usar Pandoc:
+        \begin{lstlisting}
+pandoc docs/informe_proyecto.tex -o informe.docx
+        \end{lstlisting}
+\end{enumerate}
+
+\end{document}

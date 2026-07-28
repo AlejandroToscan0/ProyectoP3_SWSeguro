@@ -1,5 +1,5 @@
 import argon2 from "argon2";
-import { Estado, type PrismaClient } from "@prisma/client";
+import { AuditAction, Estado, type PrismaClient } from "@prisma/client";
 import { HttpError } from "../../common/http-error.js";
 import type { CreateUserInput, UpdateUserInput, ListUsersInput } from "./users.schemas.js";
 
@@ -32,11 +32,9 @@ export class UserService {
     const where: {
       estado?: Estado;
       OR?: Array<{ nombre: { contains: string; mode: "insensitive" } } | { email: { contains: string; mode: "insensitive" } }>;
-    } = {};
-
-    if (estado) {
-      where.estado = estado;
-    }
+    } = {
+      estado,
+    };
 
     if (search) {
       where.OR = [
@@ -128,6 +126,16 @@ export class UserService {
       },
     });
 
+    await this.db.auditLog.create({
+      data: {
+        userId: user.id,
+        action: AuditAction.USER_CREATED,
+        detail: `Usuario creado: ${user.email}`,
+        creadoPor: createdBy,
+        actualizadoPor: createdBy,
+      },
+    });
+
     return user;
   }
 
@@ -154,7 +162,6 @@ export class UserService {
       nombre?: string;
       email?: string;
       passwordHash?: string;
-      estado?: Estado;
       actualizadoPor: string;
     } = {
       actualizadoPor: updatedBy,
@@ -163,7 +170,6 @@ export class UserService {
     if (input.nombre) updateData.nombre = input.nombre;
     if (input.email) updateData.email = input.email.toLowerCase();
     if (input.password) updateData.passwordHash = await argon2.hash(input.password);
-    if (input.estado) updateData.estado = input.estado;
 
     const updatedUser = await this.db.user.update({
       where: { id },

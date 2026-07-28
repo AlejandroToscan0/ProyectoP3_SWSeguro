@@ -1,18 +1,43 @@
 import { Router } from "express";
 import { prisma } from "../../lib/prisma.js";
 import { RoleService } from "./roles.service.js";
-import { createRoleSchema, updateRoleSchema, assignUserToRoleSchema, listRolesSchema } from "./roles.schemas.js";
+import { ModuleService } from "../modules/modules.service.js";
+import { MenuService } from "../menus/menus.service.js";
+import {
+  createRoleSchema,
+  updateRoleSchema,
+  assignUserToRoleSchema,
+  assignPermissionToRoleSchema,
+  listRolesSchema,
+} from "./roles.schemas.js";
+import { assignModuleToRoleSchema } from "../modules/modules.schemas.js";
+import { assignMenuToRoleSchema } from "../menus/menus.schemas.js";
 import { authMiddleware, type AuthRequest } from "../../middlewares/auth.middleware.js";
 import { requirePermissions } from "../../middlewares/authorization.middleware.js";
 
 const rolesRouter = Router();
 const roleService = new RoleService(prisma);
+const moduleService = new ModuleService(prisma);
+const menuService = new MenuService(prisma);
 
 rolesRouter.get("/", authMiddleware, requirePermissions("ROLES_READ"), async (req, res, next) => {
   try {
     const input = listRolesSchema.parse(req.query);
     const result = await roleService.list(input);
     res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+rolesRouter.get("/:id", authMiddleware, requirePermissions("ROLES_READ"), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (typeof id !== "string") {
+      throw new Error("Invalid id");
+    }
+    const detail = await roleService.findDetail(id);
+    res.status(200).json(detail);
   } catch (error) {
     next(error);
   }
@@ -82,6 +107,51 @@ rolesRouter.delete("/:id/users/:userId", authMiddleware, requirePermissions("ROL
     const removedBy = req.user?.userId ?? "system";
     await roleService.removeUser(id, userId, removedBy);
     res.status(200).json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+rolesRouter.post("/:id/modules", authMiddleware, requirePermissions("ROLES_ASSIGN_MODULE"), async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    if (typeof id !== "string") {
+      throw new Error("Invalid id");
+    }
+    const input = assignModuleToRoleSchema.parse(req.body);
+    const assignedBy = req.user?.userId ?? "system";
+    await moduleService.assignToRole(id, input, assignedBy);
+    res.status(201).json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+rolesRouter.post("/:id/menus", authMiddleware, requirePermissions("ROLES_ASSIGN_MENU"), async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    if (typeof id !== "string") {
+      throw new Error("Invalid id");
+    }
+    const input = assignMenuToRoleSchema.parse(req.body);
+    const assignedBy = req.user?.userId ?? "system";
+    await menuService.assignToRole(id, input, assignedBy);
+    res.status(201).json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+rolesRouter.post("/:id/permissions", authMiddleware, requirePermissions("ROLES_ASSIGN_PERMISSION"), async (req: AuthRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    if (typeof id !== "string") {
+      throw new Error("Invalid id");
+    }
+    const input = assignPermissionToRoleSchema.parse(req.body);
+    const assignedBy = req.user?.userId ?? "system";
+    await roleService.assignPermission(id, input, assignedBy);
+    res.status(201).json({ success: true });
   } catch (error) {
     next(error);
   }

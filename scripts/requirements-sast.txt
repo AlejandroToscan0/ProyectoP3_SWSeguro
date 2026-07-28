@@ -1,0 +1,3 @@
+# Dependencias SAST/ML del pipeline (versiones fijadas; torch se instala aparte desde el índice CPU).
+transformers==4.46.3
+sentencepiece==0.2.0

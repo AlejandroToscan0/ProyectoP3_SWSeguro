@@ -1,6 +1,12 @@
-import { Estado, type PrismaClient } from "@prisma/client";
+import { AuditAction, Estado, type PrismaClient } from "@prisma/client";
 import { HttpError } from "../../common/http-error.js";
-import type { CreateRoleInput, UpdateRoleInput, AssignUserToRoleInput, ListRolesInput } from "./roles.schemas.js";
+import type {
+  CreateRoleInput,
+  UpdateRoleInput,
+  AssignUserToRoleInput,
+  AssignPermissionToRoleInput,
+  ListRolesInput,
+} from "./roles.schemas.js";
 
 type SafeRole = {
   id: string;
@@ -33,9 +39,7 @@ export class RoleService {
       OR?: Array<{ nombre: { contains: string; mode: "insensitive" } } | { descripcion: { contains: string; mode: "insensitive" } }>;
     } = {};
 
-    if (estado) {
-      where.estado = estado;
-    }
+    where.estado = estado;
 
     if (search) {
       where.OR = [
@@ -95,6 +99,73 @@ export class RoleService {
     return role;
   }
 
+  async findDetail(id: string) {
+    const role = await this.db.role.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        nombre: true,
+        descripcion: true,
+        estado: true,
+        fechaCreacion: true,
+        fechaActualizacion: true,
+        creadoPor: true,
+        actualizadoPor: true,
+        userRoles: {
+          where: { estado: Estado.ACTIVO },
+          select: {
+            user: {
+              select: { id: true, nombre: true, email: true, estado: true },
+            },
+          },
+        },
+        rolePermissions: {
+          where: { estado: Estado.ACTIVO },
+          select: {
+            permission: {
+              select: { id: true, codigo: true, descripcion: true },
+            },
+          },
+        },
+        roleModules: {
+          where: { estado: Estado.ACTIVO },
+          select: {
+            module: {
+              select: { id: true, nombre: true, descripcion: true },
+            },
+          },
+        },
+        roleMenus: {
+          where: { estado: Estado.ACTIVO },
+          select: {
+            menu: {
+              select: { id: true, nombre: true, url: true, parentId: true, orden: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!role) {
+      throw new HttpError(404, "ROLE_NOT_FOUND", "Rol no encontrado");
+    }
+
+    return {
+      id: role.id,
+      nombre: role.nombre,
+      descripcion: role.descripcion,
+      estado: role.estado,
+      fechaCreacion: role.fechaCreacion,
+      fechaActualizacion: role.fechaActualizacion,
+      creadoPor: role.creadoPor,
+      actualizadoPor: role.actualizadoPor,
+      users: role.userRoles.map((item) => item.user),
+      permissions: role.rolePermissions.map((item) => item.permission),
+      modules: role.roleModules.map((item) => item.module),
+      menus: role.roleMenus.map((item) => item.menu),
+    };
+  }
+
   async create(input: CreateRoleInput, createdBy: string): Promise<SafeRole> {
     const existingRole = await this.db.role.findUnique({
       where: { nombre: input.nombre },
@@ -148,16 +219,14 @@ export class RoleService {
 
     const updateData: {
       nombre?: string;
-      descripcion?: string;
-      estado?: Estado;
+      descripcion?: string | null;
       actualizadoPor: string;
     } = {
       actualizadoPor: updatedBy,
     };
 
     if (input.nombre) updateData.nombre = input.nombre;
-    if (input.descripcion !== undefined) updateData.descripcion = input.descripcion;
-    if (input.estado) updateData.estado = input.estado;
+    if (input.descripcion !== undefined) updateData.descripcion = input.descripcion ?? null;
 
     const updatedRole = await this.db.role.update({
       where: { id },
@@ -294,6 +363,78 @@ export class RoleService {
       data: {
         estado: Estado.INACTIVO,
         actualizadoPor: removedBy,
+      },
+    });
+  }
+
+  async assignPermission(roleId: string, input: AssignPermissionToRoleInput, assignedBy: string): Promise<void> {
+    const role = await this.db.role.findUnique({
+      where: { id: roleId },
+    });
+
+    if (!role || role.estado !== Estado.ACTIVO) {
+      throw new HttpError(404, "ROLE_NOT_FOUND", "Rol no encontrado");
+    }
+
+    const permission = await this.db.permission.findUnique({
+      where: { id: input.permissionId },
+    });
+
+    if (!permission || permission.estado !== Estado.ACTIVO) {
+      throw new HttpError(404, "PERMISSION_NOT_FOUND", "Permiso no encontrado");
+    }
+
+    const existingAssignment = await this.db.rolePermission.findUnique({
+      where: {
+        roleId_permissionId: {
+          roleId,
+          permissionId: input.permissionId,
+        },
+      },
+    });
+
+    if (existingAssignment) {
+      if (existingAssignment.estado === Estado.ACTIVO) {
+        throw new HttpError(409, "ROLE_ALREADY_HAS_PERMISSION", "El rol ya tiene este permiso asignado");
+      }
+
+      await this.db.rolePermission.update({
+        where: { id: existingAssignment.id },
+        data: {
+          estado: Estado.ACTIVO,
+          actualizadoPor: assignedBy,
+        },
+      });
+
+      await this.db.auditLog.create({
+        data: {
+          roleId,
+          action: AuditAction.PERMISSIONS_CHANGED,
+          detail: `Permiso reactivado: ${permission.codigo}`,
+          creadoPor: assignedBy,
+          actualizadoPor: assignedBy,
+        },
+      });
+      return;
+    }
+
+    await this.db.rolePermission.create({
+      data: {
+        roleId,
+        permissionId: input.permissionId,
+        estado: Estado.ACTIVO,
+        creadoPor: assignedBy,
+        actualizadoPor: assignedBy,
+      },
+    });
+
+    await this.db.auditLog.create({
+      data: {
+        roleId,
+        action: AuditAction.PERMISSIONS_CHANGED,
+        detail: `Permiso asignado: ${permission.codigo}`,
+        creadoPor: assignedBy,
+        actualizadoPor: assignedBy,
       },
     });
   }

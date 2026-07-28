@@ -5,6 +5,8 @@ export const createMenuSchema = z.object({
   url: z.string().trim().max(500).nullable().optional(),
   moduleId: z.string().uuid(),
   parentId: z.string().uuid().nullable().optional(),
+  orden: z.number().int().min(0).max(10_000).optional(),
+  icono: z.string().trim().max(100).nullable().optional(),
 });
 
 export const updateMenuSchema = z.object({
@@ -12,18 +14,20 @@ export const updateMenuSchema = z.object({
   url: z.string().trim().max(500).nullable().optional(),
   moduleId: z.string().uuid().optional(),
   parentId: z.string().uuid().nullable().optional(),
-  estado: z.enum(["ACTIVO", "INACTIVO"]).optional(),
+  orden: z.number().int().min(0).max(10_000).optional(),
+  icono: z.string().trim().max(100).nullable().optional(),
 });
 
 export const assignMenuToRoleSchema = z.object({
-  menuId: z.string().uuid(),
+  // Los menús de seed usan IDs fijos (p. ej. menu-ventas), no solo UUID.
+  menuId: z.string().trim().min(1).max(100),
 });
 
 export const listMenusSchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(10),
   search: z.string().trim().optional(),
-  estado: z.enum(["ACTIVO", "INACTIVO"]).optional(),
+  estado: z.enum(["ACTIVO", "INACTIVO"]).default("ACTIVO"),
   moduleId: z.string().uuid().optional(),
   parentId: z.string().uuid().nullable().optional(),
 });
