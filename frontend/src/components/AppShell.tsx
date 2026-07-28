@@ -16,30 +16,40 @@ export function AppShell() {
   useEffect(() => {
     let active = true;
 
-    menusApi
-      .tree()
-      .then((data) => {
-        if (active) {
-          setTree(data);
-          setError(null);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!active) return;
-        if (err instanceof ApiError && err.status === 401) {
-          navigate(err.code === "TOKEN_EXPIRED" ? "/token-expired" : "/session-expired", { replace: true });
-          return;
-        }
-        // No expulsar a /forbidden: el shell debe seguir usable (inicio + logout).
-        setTree([]);
-        setError(err instanceof Error ? err.message : "No se pudo cargar el menú");
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    function loadTree() {
+      return menusApi
+        .tree()
+        .then((data) => {
+          if (active) {
+            setTree(data);
+            setError(null);
+          }
+        })
+        .catch((err: unknown) => {
+          if (!active) return;
+          if (err instanceof ApiError && err.status === 401) {
+            navigate(err.code === "TOKEN_EXPIRED" ? "/token-expired" : "/session-expired", { replace: true });
+            return;
+          }
+          // No expulsar a /forbidden: el shell debe seguir usable (inicio + logout).
+          setTree([]);
+          setError(err instanceof Error ? err.message : "No se pudo cargar el menú");
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+    }
+
+    void loadTree();
+
+    function onMenuRefresh() {
+      void loadTree();
+    }
+    window.addEventListener("master:menu-refresh", onMenuRefresh);
 
     return () => {
       active = false;
+      window.removeEventListener("master:menu-refresh", onMenuRefresh);
     };
   }, [navigate]);
 
