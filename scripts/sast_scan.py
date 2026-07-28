@@ -40,34 +40,47 @@ def scan_file(filepath: Path, model, tokenizer) -> bool:
     return vul_prob > 0.5
 
 
-def main() -> int:
-    try:
-        from transformers import AutoModelForSequenceClassification, AutoTokenizer
-    except ImportError:
-        print("Error: faltan dependencias. Ejecuta: pip install torch transformers")
-        write_output(True)
-        return 1
+def load_model():
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
     print(f"Cargando modelo {MODEL_NAME}...")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
     model.eval()
+    return model, tokenizer
 
-    vulnerable_files: list[str] = []
 
+def iter_scan_targets():
     for scan_dir in SCAN_DIRS:
         root = Path(scan_dir)
         if not root.exists():
             continue
         for path in root.rglob("*"):
-            if not path.is_file() or path.suffix not in EXTENSIONS:
-                continue
-            print(f"  Escaneando: {path}")
-            try:
-                if scan_file(path, model, tokenizer):
-                    vulnerable_files.append(str(path))
-            except Exception as exc:  # noqa: BLE001
-                print(f"  Error escaneando {path}: {exc}")
+            if path.is_file() and path.suffix in EXTENSIONS:
+                yield path
+
+
+def find_vulnerable_files(model, tokenizer) -> list[str]:
+    vulnerable_files: list[str] = []
+    for path in iter_scan_targets():
+        print(f"  Escaneando: {path}")
+        try:
+            if scan_file(path, model, tokenizer):
+                vulnerable_files.append(str(path))
+        except Exception as exc:  # noqa: BLE001
+            print(f"  Error escaneando {path}: {exc}")
+    return vulnerable_files
+
+
+def main() -> int:
+    try:
+        model, tokenizer = load_model()
+    except ImportError:
+        print("Error: faltan dependencias. Ejecuta: pip install torch transformers")
+        write_output(True)
+        return 1
+
+    vulnerable_files = find_vulnerable_files(model, tokenizer)
 
     if vulnerable_files:
         print(f"Vulnerabilidades detectadas en: {vulnerable_files}")

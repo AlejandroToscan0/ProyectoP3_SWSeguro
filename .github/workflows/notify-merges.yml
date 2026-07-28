@@ -22,14 +22,14 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          HEAD: ${{ github.event.pull_request.head.ref }}
+          TITLE: ${{ github.event.pull_request.title }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
-          BASE="${{ github.event.pull_request.base.ref }}"
-          HEAD="${{ github.event.pull_request.head.ref }}"
-          TITLE="${{ github.event.pull_request.title }}"
-          AUTHOR="${{ github.event.pull_request.user.login }}"
-          NUMBER="${{ github.event.pull_request.number }}"
 
           curl -sS -X POST "$URL" \
             -d "chat_id=${TELEGRAM_CHAT_ID}" \

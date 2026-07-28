@@ -9,6 +9,27 @@ const KEYS = {
   roles: "mg.roles",
 } as const;
 
+function sanitizeString(value: string): string {
+  return typeof value === "string" ? value.replace(/[<>"'`]/g, "") : "";
+}
+
+function sanitizeDeep<T>(value: T): T {
+  if (typeof value === "string") {
+    return sanitizeString(value) as unknown as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeDeep(item)) as unknown as T;
+  }
+  if (value && typeof value === "object") {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      sanitized[key] = sanitizeDeep(val);
+    }
+    return sanitized as T;
+  }
+  return value;
+}
+
 export const tokenStorage = {
   getAccessToken(): string | null {
     return sessionStorage.getItem(KEYS.accessToken);
@@ -38,8 +59,8 @@ export const tokenStorage = {
   },
 
   setLogin(data: LoginResponse): void {
-    sessionStorage.setItem(KEYS.tempToken, data.tempToken);
-    sessionStorage.setItem(KEYS.roles, JSON.stringify(data.roles));
+    sessionStorage.setItem(KEYS.tempToken, sanitizeString(data.tempToken));
+    sessionStorage.setItem(KEYS.roles, JSON.stringify(sanitizeDeep(data.roles)));
     sessionStorage.removeItem(KEYS.accessToken);
     sessionStorage.removeItem(KEYS.refreshToken);
     sessionStorage.removeItem(KEYS.role);
@@ -47,10 +68,10 @@ export const tokenStorage = {
   },
 
   setSession(data: AuthSession): void {
-    sessionStorage.setItem(KEYS.accessToken, data.accessToken);
-    sessionStorage.setItem(KEYS.refreshToken, data.refreshToken);
-    sessionStorage.setItem(KEYS.role, JSON.stringify(data.role));
-    sessionStorage.setItem(KEYS.permissions, JSON.stringify(data.permissions));
+    sessionStorage.setItem(KEYS.accessToken, sanitizeString(data.accessToken));
+    sessionStorage.setItem(KEYS.refreshToken, sanitizeString(data.refreshToken));
+    sessionStorage.setItem(KEYS.role, JSON.stringify(sanitizeDeep(data.role)));
+    sessionStorage.setItem(KEYS.permissions, JSON.stringify(sanitizeDeep(data.permissions)));
     sessionStorage.removeItem(KEYS.tempToken);
     sessionStorage.removeItem(KEYS.roles);
   },
