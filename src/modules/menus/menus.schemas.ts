@@ -19,7 +19,8 @@ export const updateMenuSchema = z.object({
 });
 
 export const assignMenuToRoleSchema = z.object({
-  menuId: z.string().uuid(),
+  // Los menús de seed usan IDs fijos (p. ej. menu-ventas), no solo UUID.
+  menuId: z.string().trim().min(1).max(100),
 });
 
 export const listMenusSchema = z.object({

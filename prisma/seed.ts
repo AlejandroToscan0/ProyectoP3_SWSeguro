@@ -426,6 +426,9 @@ async function main() {
     },
   });
 
+  const { seedDemoRoles } = await import("./seed-demo-roles.js");
+  await seedDemoRoles(prisma);
+
   console.log("Seed completado correctamente");
 }
 

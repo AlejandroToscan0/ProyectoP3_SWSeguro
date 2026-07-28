@@ -68,6 +68,20 @@ export type SafeMenu = {
   estado: string;
 };
 
+export type SafePermission = {
+  id: string;
+  codigo: string;
+  descripcion: string | null;
+  estado: string;
+};
+
+export type RoleDetail = SafeRole & {
+  users: SafeUser[];
+  permissions: Array<Pick<SafePermission, "id" | "codigo" | "descripcion">>;
+  modules: Array<Pick<SafeModule, "id" | "nombre" | "descripcion">>;
+  menus: Array<Pick<SafeMenu, "id" | "nombre" | "url" | "parentId" | "orden">>;
+};
+
 export class ApiError extends Error {
   status: number;
   code: string;

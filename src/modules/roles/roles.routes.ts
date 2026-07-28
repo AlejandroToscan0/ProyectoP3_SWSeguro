@@ -30,6 +30,19 @@ rolesRouter.get("/", authMiddleware, requirePermissions("ROLES_READ"), async (re
   }
 });
 
+rolesRouter.get("/:id", authMiddleware, requirePermissions("ROLES_READ"), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (typeof id !== "string") {
+      throw new Error("Invalid id");
+    }
+    const detail = await roleService.findDetail(id);
+    res.status(200).json(detail);
+  } catch (error) {
+    next(error);
+  }
+});
+
 rolesRouter.post("/", authMiddleware, requirePermissions("ROLES_CREATE"), async (req: AuthRequest, res, next) => {
   try {
     const input = createRoleSchema.parse(req.body);

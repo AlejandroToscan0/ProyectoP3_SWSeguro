@@ -30,10 +30,8 @@ export function AppShell() {
           navigate(err.code === "TOKEN_EXPIRED" ? "/token-expired" : "/session-expired", { replace: true });
           return;
         }
-        if (err instanceof ApiError && err.status === 403) {
-          navigate("/forbidden", { replace: true });
-          return;
-        }
+        // No expulsar a /forbidden: el shell debe seguir usable (inicio + logout).
+        setTree([]);
         setError(err instanceof Error ? err.message : "No se pudo cargar el menú");
       })
       .finally(() => {
@@ -64,6 +62,9 @@ export function AppShell() {
           {loading ? <p className="muted">Cargando menú…</p> : null}
           {error ? <p className="error-text">{error}</p> : null}
           {!loading && !error ? <DynamicMenu tree={tree} /> : null}
+          {!loading && !error && tree.length === 0 ? (
+            <p className="muted">Este rol no tiene menús asignados.</p>
+          ) : null}
         </nav>
 
         <div className="sidebar-footer">

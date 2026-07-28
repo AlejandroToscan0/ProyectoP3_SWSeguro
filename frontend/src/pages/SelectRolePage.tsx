@@ -4,7 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import { ApiError } from "../types";
 
 export function SelectRolePage() {
-  const { roles, selectRole } = useAuth();
+  const { roles, selectRole, cancelRoleSelection } = useAuth();
   const navigate = useNavigate();
   const [selected, setSelected] = useState(roles[0]?.id ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +33,11 @@ export function SelectRolePage() {
     }
   }
 
+  function goBackToLogin() {
+    cancelRoleSelection();
+    navigate("/login", { replace: true });
+  }
+
   return (
     <div className="auth-layout">
       <section className="auth-panel">
@@ -49,6 +54,7 @@ export function SelectRolePage() {
               type="button"
               className={selected === role.id ? "role-card selected" : "role-card"}
               onClick={() => setSelected(role.id)}
+              disabled={loading}
             >
               <strong>{role.nombre}</strong>
               <span className="muted">Contexto de seguridad aislado</span>
@@ -58,9 +64,14 @@ export function SelectRolePage() {
 
         {error ? <p className="error-text">{error}</p> : null}
 
-        <button className="button primary" type="button" onClick={confirmRole} disabled={loading || !selected}>
-          {loading ? "Generando sesión…" : "Entrar con este rol"}
-        </button>
+        <div className="auth-actions">
+          <button className="button primary" type="button" onClick={confirmRole} disabled={loading || !selected}>
+            {loading ? "Generando sesión…" : "Entrar con este rol"}
+          </button>
+          <button className="button ghost auth-back" type="button" onClick={goBackToLogin} disabled={loading}>
+            Cancelar / otro usuario
+          </button>
+        </div>
       </section>
     </div>
   );

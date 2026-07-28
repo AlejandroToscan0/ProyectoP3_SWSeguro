@@ -24,6 +24,7 @@ type AuthContextValue = AuthState & {
   needsRoleSelection: boolean;
   login: (email: string, password: string) => Promise<void>;
   selectRole: (roleId: string) => Promise<void>;
+  cancelRoleSelection: () => void;
   logout: () => Promise<void>;
   hasPermission: (code: string) => boolean;
 };
@@ -60,6 +61,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState(readState());
   }, []);
 
+  const cancelRoleSelection = useCallback(() => {
+    // Descarta TempToken y roles pendientes para volver al login.
+    tokenStorage.clear();
+    setState(readState());
+  }, []);
+
   const logout = useCallback(async () => {
     const accessToken = tokenStorage.getAccessToken();
     const refreshToken = tokenStorage.getRefreshToken();
@@ -79,10 +86,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       needsRoleSelection: Boolean(state.tempToken && !state.accessToken),
       login,
       selectRole,
+      cancelRoleSelection,
       logout,
       hasPermission: (code: string) => state.permissions.includes(code),
     }),
-    [state, login, selectRole, logout],
+    [state, login, selectRole, cancelRoleSelection, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

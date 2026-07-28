@@ -165,6 +165,8 @@ npm run db:reset
 npm run dev
 ```
 
+Nota: el Postgres de Docker usa el puerto host **5433** (`localhost:5433`) para no chocar con un Postgres local en `5432`.
+
 Para apagar la base de datos:
 
 ```bash
@@ -210,9 +212,20 @@ npm run frontend:dev
 Flujo esperado en `http://localhost:5173`:
 
 1. Login con `admin@example.com` / `ChangeMe123!`
-2. Selección obligatoria de rol
+2. Selección obligatoria de rol (`ADMIN`, `VENDEDOR` o `AUDITOR` tras el seed demo)
 3. Navegación por menú dinámico (incluye Ventas)
-4. Cerrar sesión
+4. En **Roles**: crear roles, aplicar plantillas y asignar usuarios/permisos/menús
+5. En **Usuarios**: alta rápida con rol inicial
+6. Cerrar sesión
+
+Usuarios demo adicionales (seed):
+
+| Email | Password | Rol |
+| --- | --- | --- |
+| `vendedor@example.com` | `ChangeMe123!` | VENDEDOR |
+| `auditor@example.com` | `ChangeMe123!` | AUDITOR |
+
+Para regenerar solo roles demo: `npm run seed:demo-roles`
 
 Más detalle en `frontend/README.md` y `services/ventas/README.md`.
 
@@ -369,7 +382,7 @@ sequenceDiagram
 ### Fases del pipeline
 
 | Fase | Descripción |
-|---|---|
+| --- | --- |
 | **1. Build y Tests** | Compila Master/Frontend/Ventas y ejecuta pruebas unitarias |
 | **2. SonarCloud** | Análisis estático Shift-Left; **Quality Gate obligatorio** |
 | **3. Modelo ML** | SAST avanzado con `mahdin70/CodeBERT-VulnCWE` sobre `src/**/*.ts` |
@@ -380,7 +393,7 @@ Si SonarCloud o el modelo ML detectan anomalías, el pipeline se detiene y se no
 ### Workflows relacionados
 
 | Archivo | Trigger |
-|---|---|
+| --- | --- |
 | `ci-cd-deploy.yml` | Merge a `main` → pipeline completo + deploy |
 | `ci-pr.yml` | PRs a `dev`/`test` → build + tests |
 | `notify-merges.yml` | Merges a `dev`/`test`/`main` → Telegram |
@@ -389,7 +402,7 @@ Si SonarCloud o el modelo ML detectan anomalías, el pipeline se detiene y se no
 ### Secrets requeridos para CI/CD (GitHub Actions)
 
 | Secret | Propósito |
-|---|---|
+| --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Token del bot de Telegram |
 | `TELEGRAM_CHAT_ID` | ID del chat/grupo de Telegram |
 | `TELEGRAM_API_URL` | (Opcional) URL completa de `sendMessage` |

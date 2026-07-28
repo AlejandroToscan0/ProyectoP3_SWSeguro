@@ -99,6 +99,73 @@ export class RoleService {
     return role;
   }
 
+  async findDetail(id: string) {
+    const role = await this.db.role.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        nombre: true,
+        descripcion: true,
+        estado: true,
+        fechaCreacion: true,
+        fechaActualizacion: true,
+        creadoPor: true,
+        actualizadoPor: true,
+        userRoles: {
+          where: { estado: Estado.ACTIVO },
+          select: {
+            user: {
+              select: { id: true, nombre: true, email: true, estado: true },
+            },
+          },
+        },
+        rolePermissions: {
+          where: { estado: Estado.ACTIVO },
+          select: {
+            permission: {
+              select: { id: true, codigo: true, descripcion: true },
+            },
+          },
+        },
+        roleModules: {
+          where: { estado: Estado.ACTIVO },
+          select: {
+            module: {
+              select: { id: true, nombre: true, descripcion: true },
+            },
+          },
+        },
+        roleMenus: {
+          where: { estado: Estado.ACTIVO },
+          select: {
+            menu: {
+              select: { id: true, nombre: true, url: true, parentId: true, orden: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!role) {
+      throw new HttpError(404, "ROLE_NOT_FOUND", "Rol no encontrado");
+    }
+
+    return {
+      id: role.id,
+      nombre: role.nombre,
+      descripcion: role.descripcion,
+      estado: role.estado,
+      fechaCreacion: role.fechaCreacion,
+      fechaActualizacion: role.fechaActualizacion,
+      creadoPor: role.creadoPor,
+      actualizadoPor: role.actualizadoPor,
+      users: role.userRoles.map((item) => item.user),
+      permissions: role.rolePermissions.map((item) => item.permission),
+      modules: role.roleModules.map((item) => item.module),
+      menus: role.roleMenus.map((item) => item.menu),
+    };
+  }
+
   async create(input: CreateRoleInput, createdBy: string): Promise<SafeRole> {
     const existingRole = await this.db.role.findUnique({
       where: { nombre: input.nombre },

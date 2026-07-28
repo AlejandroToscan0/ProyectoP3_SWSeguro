@@ -1,14 +1,36 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
 
 export function ForbiddenPage() {
+  const { isAuthenticated, logout } = useAuth();
+  const navigate = useNavigate();
+
+  async function onLogout() {
+    await logout();
+    navigate("/login", { replace: true });
+  }
+
   return (
     <div className="status-page">
       <p className="brand">Master Gateway</p>
       <h1>Acceso denegado</h1>
       <p className="muted">Su rol activo no tiene permisos para este recurso.</p>
-      <Link className="button primary" to="/app">
-        Volver al inicio
-      </Link>
+      <div className="auth-actions">
+        {isAuthenticated ? (
+          <Link className="button primary" to="/app">
+            Volver al inicio
+          </Link>
+        ) : (
+          <Link className="button primary" to="/login">
+            Ir al login
+          </Link>
+        )}
+        {isAuthenticated ? (
+          <button className="button ghost auth-back" type="button" onClick={() => void onLogout()}>
+            Cerrar sesión / otro usuario
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
