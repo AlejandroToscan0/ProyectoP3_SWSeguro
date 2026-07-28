@@ -43,9 +43,11 @@ type RefreshResponse = {
 };
 
 type ValidateTokenResponse = {
-  válido: boolean;
+  active: boolean;
   userId: string;
   roleId: string;
+  roleName: string;
+  permissions: string[];
 };
 
 export const encoder = new TextEncoder();
@@ -235,7 +237,15 @@ export class AuthService {
       throw new HttpError(401, "INVALID_REFRESH_TOKEN", "Refresh token invalido");
     }
 
-    const permissions: string[] = [];
+    const rolePermissions = await this.db.rolePermission.findMany({
+      where: {
+        roleId: stored.roleId,
+        estado: Estado.ACTIVO,
+        permission: { estado: Estado.ACTIVO },
+      },
+      include: { permission: true },
+    });
+    const permissions = rolePermissions.map((rp) => rp.permission.codigo);
     const session = await this.issueSession(stored.userId, stored.roleId, stored.role.nombre, permissions);
 
     await this.db.refreshToken.update({
@@ -350,9 +360,11 @@ export class AuthService {
     }
 
     return {
-      válido: true,
+      active: true,
       userId: payload.sub,
       roleId: payload.roleId,
+      roleName: payload.roleName,
+      permissions: payload.permissions,
     };
   }
 

@@ -75,6 +75,10 @@ async function run() {
   });
   assert(validate.status === 200, "validate-token fallido", validate);
   assert(validate.body.active === true, "validate-token no marcó token activo", validate.body);
+  assert(typeof validate.body.userId === "string", "validate-token sin userId", validate.body);
+  assert(typeof validate.body.roleId === "string", "validate-token sin roleId", validate.body);
+  assert(typeof validate.body.roleName === "string", "validate-token sin roleName", validate.body);
+  assert(Array.isArray(validate.body.permissions), "validate-token sin permissions", validate.body);
 
   const logout = await request("/api/auth/logout", {
     method: "POST",

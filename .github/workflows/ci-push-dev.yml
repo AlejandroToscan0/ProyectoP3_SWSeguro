@@ -1,0 +1,79 @@
+name: CI en Push directo a dev
+
+# Cubre el caso de un push directo a dev (sin pasar por un PR de feature branch),
+# que ci-pr.yml no detecta porque solo escucha eventos de pull_request.
+# Corre build/tests y notifica éxito o fallo a Telegram.
+
+on:
+  push:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias Master
+        run: npm ci --ignore-scripts
+
+      - name: Generar cliente Prisma
+        run: npm run prisma:generate
+
+      - name: Instalar dependencias Frontend
+        run: npm --prefix frontend ci --ignore-scripts
+
+      - name: Instalar dependencias Ventas
+        run: npm --prefix services/ventas ci --ignore-scripts
+
+      - name: Build Master
+        run: npm run build
+
+      - name: Tests
+        run: npm run test
+
+      - name: Build Frontend
+        run: npm run frontend:build
+
+      - name: Build Ventas
+        run: npm run ventas:build
+
+      - name: Notificar éxito
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+        run: |
+          set -euo pipefail
+          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
+          curl -sS -X POST "$URL" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=✅ Push directo a DEV: build y tests OK
+          Autor: ${{ github.actor }}
+          Commit: ${{ github.sha }}"
+
+      - name: Notificar fallo
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+        run: |
+          set -euo pipefail
+          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
+          curl -sS -X POST "$URL" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=❌ Push directo a DEV falló (build/tests)
+          Autor: ${{ github.actor }}
+          Commit: ${{ github.sha }}
+          Revisar: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

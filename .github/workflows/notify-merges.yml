@@ -1,0 +1,51 @@
+name: Notificar merges
+
+# Notifica a Telegram merges exitosos hacia dev, test y main.
+
+on:
+  pull_request:
+    branches: [dev, test, main]
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  notify-merge:
+    name: Notificar merge
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enviar notificación Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          HEAD: ${{ github.event.pull_request.head.ref }}
+          TITLE: ${{ github.event.pull_request.title }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import os
+          import urllib.parse
+          import urllib.request
+
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          chat_id = os.environ["TELEGRAM_CHAT_ID"]
+          api_url = os.environ.get("TELEGRAM_API_URL") or f"https://api.telegram.org/bot{token}/sendMessage"
+
+          text = (
+              f"🔀 Merge exitoso a {os.environ.get('BASE', '')}\n"
+              f"Origen: {os.environ.get('HEAD', '')}\n"
+              f"PR #{os.environ.get('NUMBER', '')}: {os.environ.get('TITLE', '')}\n"
+              f"Autor: {os.environ.get('AUTHOR', '')}"
+          )
+          data = urllib.parse.urlencode({"chat_id": chat_id, "text": text}).encode()
+          req = urllib.request.Request(api_url, data=data, method="POST")
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              resp.read()
+          PY
