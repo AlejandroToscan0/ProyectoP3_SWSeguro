@@ -4,5 +4,9 @@ dist
 .env.local
 .DS_Store
 PROJECT_CONTEXT.md
+frontend/dist
+frontend/node_modules
+services/ventas/dist
+services/ventas/node_modules
 
 docs/

@@ -1,4 +1,4 @@
-import { Estado, type PrismaClient } from "@prisma/client";
+import { Estado, Prisma, type PrismaClient } from "@prisma/client";
 import { HttpError } from "../../common/http-error.js";
 import type { CreateMenuInput, UpdateMenuInput, AssignMenuToRoleInput, ListMenusInput } from "./menus.schemas.js";
 
@@ -8,6 +8,8 @@ type SafeMenu = {
   url: string | null;
   moduleId: string;
   parentId: string | null;
+  orden: number;
+  icono: string | null;
   estado: Estado;
   fechaCreacion: Date;
   fechaActualizacion: Date;
@@ -29,8 +31,35 @@ type MenuTreeNode = {
   url: string | null;
   moduleId: string;
   parentId: string | null;
+  orden: number;
+  icono: string | null;
   children: MenuTreeNode[];
 };
+
+type CteMenuRow = {
+  id: string;
+  nombre: string;
+  url: string | null;
+  moduleId: string;
+  parentId: string | null;
+  orden: number;
+  icono: string | null;
+};
+
+const menuSelect = {
+  id: true,
+  nombre: true,
+  url: true,
+  moduleId: true,
+  parentId: true,
+  orden: true,
+  icono: true,
+  estado: true,
+  fechaCreacion: true,
+  fechaActualizacion: true,
+  creadoPor: true,
+  actualizadoPor: true,
+} as const;
 
 export class MenuService {
   constructor(private readonly db: PrismaClient) {}
@@ -39,16 +68,9 @@ export class MenuService {
     const { page, limit, search, estado, moduleId, parentId } = input;
     const skip = (page - 1) * limit;
 
-    const where: {
-      estado?: Estado;
-      moduleId?: string;
-      parentId?: string | null;
-      OR?: Array<{ nombre: { contains: string; mode: "insensitive" } } | { url: { contains: string; mode: "insensitive" } }>;
-    } = {};
-
-    if (estado) {
-      where.estado = estado;
-    }
+    const where: Prisma.MenuWhereInput = {
+      estado,
+    };
 
     if (moduleId) {
       where.moduleId = moduleId;
@@ -70,19 +92,8 @@ export class MenuService {
         where,
         skip,
         take: limit,
-        select: {
-          id: true,
-          nombre: true,
-          url: true,
-          moduleId: true,
-          parentId: true,
-          estado: true,
-          fechaCreacion: true,
-          fechaActualizacion: true,
-          creadoPor: true,
-          actualizadoPor: true,
-        },
-        orderBy: { fechaCreacion: "desc" },
+        select: menuSelect,
+        orderBy: [{ orden: "asc" }, { nombre: "asc" }],
       }),
       this.db.menu.count({ where }),
     ]);
@@ -99,18 +110,7 @@ export class MenuService {
   async findById(id: string): Promise<SafeMenu> {
     const menu = await this.db.menu.findUnique({
       where: { id },
-      select: {
-        id: true,
-        nombre: true,
-        url: true,
-        moduleId: true,
-        parentId: true,
-        estado: true,
-        fechaCreacion: true,
-        fechaActualizacion: true,
-        creadoPor: true,
-        actualizadoPor: true,
-      },
+      select: menuSelect,
     });
 
     if (!menu) {
@@ -120,9 +120,13 @@ export class MenuService {
     return menu;
   }
 
-  private async wouldCreateCycle(menuId: string | null, newParentId: string | null): Promise<boolean> {
-    if (!newParentId || newParentId === menuId) {
+  private async wouldCreateCycle(menuId: string, newParentId: string | null): Promise<boolean> {
+    if (!newParentId) {
       return false;
+    }
+
+    if (newParentId === menuId) {
+      return true;
     }
 
     let currentId: string | null = newParentId;
@@ -141,16 +145,58 @@ export class MenuService {
 
       visited.add(currentId);
 
-      const parent = await this.db.menu.findUnique({
+      const parent: { parentId: string | null } | null = await this.db.menu.findUnique({
         where: { id: currentId },
         select: { parentId: true },
-      }) as { parentId: string | null } | null;
+      });
 
       currentId = parent?.parentId ?? null;
       depth++;
     }
 
     return depth >= maxDepth;
+  }
+
+  private async assertLeafUrlRules(params: {
+    menuId?: string;
+    url: string | null;
+    parentId: string | null;
+  }): Promise<void> {
+    if (params.menuId) {
+      const activeChildren = await this.db.menu.count({
+        where: {
+          parentId: params.menuId,
+          estado: Estado.ACTIVO,
+        },
+      });
+
+      if (activeChildren > 0 && params.url) {
+        throw new HttpError(
+          400,
+          "NON_LEAF_CANNOT_HAVE_URL",
+          "Solo los nodos hoja pueden tener URL",
+        );
+      }
+    }
+
+    if (params.parentId && params.url === null) {
+      // Intermediate nodes are allowed without URL; no extra check.
+    }
+
+    if (params.parentId) {
+      const parent = await this.db.menu.findUnique({
+        where: { id: params.parentId },
+        select: { url: true, estado: true },
+      });
+
+      if (parent?.url) {
+        throw new HttpError(
+          400,
+          "PARENT_MUST_BE_INTERMEDIATE",
+          "El menú padre no puede tener URL; solo los nodos hoja pueden tenerla",
+        );
+      }
+    }
   }
 
   async create(input: CreateMenuInput, createdBy: string): Promise<SafeMenu> {
@@ -162,9 +208,12 @@ export class MenuService {
       throw new HttpError(404, "MODULE_NOT_FOUND", "Módulo no encontrado");
     }
 
-    if (input.parentId) {
+    const parentId = input.parentId ?? null;
+    const url = input.url ?? null;
+
+    if (parentId) {
       const parent = await this.db.menu.findUnique({
-        where: { id: input.parentId },
+        where: { id: parentId },
       });
 
       if (!parent || parent.estado !== Estado.ACTIVO) {
@@ -176,33 +225,21 @@ export class MenuService {
       }
     }
 
-    const wouldCreateCycle = await this.wouldCreateCycle(null, input.parentId ?? null);
-    if (wouldCreateCycle) {
-      throw new HttpError(400, "WOULD_CREATE_CYCLE", "Esta asignación crearía un ciclo en la jerarquía");
-    }
+    await this.assertLeafUrlRules({ url, parentId });
 
     const menu = await this.db.menu.create({
       data: {
         nombre: input.nombre,
-        url: input.url ?? null,
+        url,
         moduleId: input.moduleId,
-        parentId: input.parentId ?? null,
+        parentId,
+        orden: input.orden ?? 0,
+        icono: input.icono ?? null,
         estado: Estado.ACTIVO,
         creadoPor: createdBy,
         actualizadoPor: createdBy,
       },
-      select: {
-        id: true,
-        nombre: true,
-        url: true,
-        moduleId: true,
-        parentId: true,
-        estado: true,
-        fechaCreacion: true,
-        fechaActualizacion: true,
-        creadoPor: true,
-        actualizadoPor: true,
-      },
+      select: menuSelect,
     });
 
     return menu;
@@ -227,60 +264,56 @@ export class MenuService {
       }
     }
 
-    if (input.parentId !== undefined) {
-      if (input.parentId) {
-        const parent = await this.db.menu.findUnique({
-          where: { id: input.parentId },
-        });
+    const nextParentId = input.parentId !== undefined ? input.parentId : menu.parentId;
+    const nextUrl = input.url !== undefined ? input.url : menu.url;
+    const nextModuleId = input.moduleId ?? menu.moduleId;
 
-        if (!parent || parent.estado !== Estado.ACTIVO) {
-          throw new HttpError(404, "PARENT_MENU_NOT_FOUND", "Menú padre no encontrado");
-        }
+    if (nextParentId) {
+      const parent = await this.db.menu.findUnique({
+        where: { id: nextParentId },
+      });
 
-        const targetModuleId = input.moduleId ?? menu.moduleId;
-        if (parent.moduleId !== targetModuleId) {
-          throw new HttpError(400, "INVALID_PARENT_MODULE", "El menú padre debe pertenecer al mismo módulo");
-        }
+      if (!parent || parent.estado !== Estado.ACTIVO) {
+        throw new HttpError(404, "PARENT_MENU_NOT_FOUND", "Menú padre no encontrado");
       }
 
-      const wouldCreateCycle = await this.wouldCreateCycle(id, input.parentId ?? null);
+      if (parent.moduleId !== nextModuleId) {
+        throw new HttpError(400, "INVALID_PARENT_MODULE", "El menú padre debe pertenecer al mismo módulo");
+      }
+
+      const wouldCreateCycle = await this.wouldCreateCycle(id, nextParentId);
       if (wouldCreateCycle) {
         throw new HttpError(400, "WOULD_CREATE_CYCLE", "Esta asignación crearía un ciclo en la jerarquía");
       }
     }
 
-    const updateData: {
-      nombre?: string;
-      url?: string | null;
-      moduleId?: string;
-      parentId?: string | null;
-      estado?: Estado;
-      actualizadoPor: string;
-    } = {
+    await this.assertLeafUrlRules({
+      menuId: id,
+      url: nextUrl,
+      parentId: nextParentId,
+    });
+
+    const updateData: Prisma.MenuUpdateInput = {
       actualizadoPor: updatedBy,
     };
 
     if (input.nombre) updateData.nombre = input.nombre;
     if (input.url !== undefined) updateData.url = input.url;
-    if (input.moduleId) updateData.moduleId = input.moduleId;
-    if (input.parentId !== undefined) updateData.parentId = input.parentId;
-    if (input.estado) updateData.estado = input.estado;
+    if (input.moduleId) {
+      updateData.module = { connect: { id: input.moduleId } };
+    }
+    if (input.parentId !== undefined) {
+      updateData.parent = input.parentId
+        ? { connect: { id: input.parentId } }
+        : { disconnect: true };
+    }
+    if (input.orden !== undefined) updateData.orden = input.orden;
+    if (input.icono !== undefined) updateData.icono = input.icono;
 
     const updatedMenu = await this.db.menu.update({
       where: { id },
       data: updateData,
-      select: {
-        id: true,
-        nombre: true,
-        url: true,
-        moduleId: true,
-        parentId: true,
-        estado: true,
-        fechaCreacion: true,
-        fechaActualizacion: true,
-        creadoPor: true,
-        actualizadoPor: true,
-      },
+      select: menuSelect,
     });
 
     return updatedMenu;
@@ -291,9 +324,6 @@ export class MenuService {
       where: { id },
       include: {
         children: {
-          where: { estado: Estado.ACTIVO },
-        },
-        roleMenus: {
           where: { estado: Estado.ACTIVO },
         },
       },
@@ -311,28 +341,13 @@ export class MenuService {
       throw new HttpError(400, "MENU_HAS_ACTIVE_CHILDREN", "El menú tiene hijos activos");
     }
 
-    if (menu.roleMenus.length > 0) {
-      throw new HttpError(400, "MENU_HAS_ACTIVE_ROLES", "El menú tiene roles activos asignados");
-    }
-
     const deletedMenu = await this.db.menu.update({
       where: { id },
       data: {
         estado: Estado.INACTIVO,
         actualizadoPor: deletedBy,
       },
-      select: {
-        id: true,
-        nombre: true,
-        url: true,
-        moduleId: true,
-        parentId: true,
-        estado: true,
-        fechaCreacion: true,
-        fechaActualizacion: true,
-        creadoPor: true,
-        actualizadoPor: true,
-      },
+      select: menuSelect,
     });
 
     return deletedMenu;
@@ -349,9 +364,10 @@ export class MenuService {
 
     const menu = await this.db.menu.findUnique({
       where: { id: input.menuId },
+      include: { module: true },
     });
 
-    if (!menu || menu.estado !== Estado.ACTIVO) {
+    if (!menu || menu.estado !== Estado.ACTIVO || menu.module.estado !== Estado.ACTIVO) {
       throw new HttpError(404, "MENU_NOT_FOUND", "Menú no encontrado");
     }
 
@@ -376,77 +392,102 @@ export class MenuService {
           actualizadoPor: assignedBy,
         },
       });
-    } else {
-      await this.db.roleMenu.create({
-        data: {
-          roleId,
-          menuId: input.menuId,
-          estado: Estado.ACTIVO,
-          creadoPor: assignedBy,
-          actualizadoPor: assignedBy,
-        },
-      });
+      return;
     }
+
+    await this.db.roleMenu.create({
+      data: {
+        roleId,
+        menuId: input.menuId,
+        estado: Estado.ACTIVO,
+        creadoPor: assignedBy,
+        actualizadoPor: assignedBy,
+      },
+    });
   }
 
   async getTreeForRole(roleId: string): Promise<MenuTreeNode[]> {
     const role = await this.db.role.findUnique({
       where: { id: roleId },
-      include: {
-        roleMenus: {
-          where: { estado: Estado.ACTIVO },
-          include: {
-            menu: {
-              where: { estado: Estado.ACTIVO },
-              include: {
-                module: true,
-              },
-            },
-          },
-        },
-      },
+      select: { id: true, estado: true },
     });
 
     if (!role || role.estado !== Estado.ACTIVO) {
       throw new HttpError(404, "ROLE_NOT_FOUND", "Rol no encontrado");
     }
 
-    const menuIds = role.roleMenus
-      .map((rm: { menu: { id: string } }) => rm.menu.id)
-      .filter((id: unknown): id is string => typeof id === "string");
+    const rows = await this.db.$queryRaw<CteMenuRow[]>(Prisma.sql`
+      WITH RECURSIVE menu_tree AS (
+        SELECT
+          m.id,
+          m.nombre,
+          m.url,
+          m."moduleId",
+          m."parentId",
+          m.orden,
+          m.icono
+        FROM "Menu" m
+        INNER JOIN "RoleMenu" rm ON rm."menuId" = m.id
+        INNER JOIN "Module" mod ON mod.id = m."moduleId"
+        WHERE rm."roleId" = ${roleId}::text
+          AND rm.estado = 'ACTIVO'::"Estado"
+          AND m.estado = 'ACTIVO'::"Estado"
+          AND mod.estado = 'ACTIVO'::"Estado"
 
-    if (menuIds.length === 0) {
+        UNION
+
+        SELECT
+          p.id,
+          p.nombre,
+          p.url,
+          p."moduleId",
+          p."parentId",
+          p.orden,
+          p.icono
+        FROM "Menu" p
+        INNER JOIN menu_tree child ON child."parentId" = p.id
+        INNER JOIN "Module" mod ON mod.id = p."moduleId"
+        WHERE p.estado = 'ACTIVO'::"Estado"
+          AND mod.estado = 'ACTIVO'::"Estado"
+      )
+      SELECT DISTINCT
+        id,
+        nombre,
+        url,
+        "moduleId",
+        "parentId",
+        orden,
+        icono
+      FROM menu_tree
+      ORDER BY orden ASC, nombre ASC
+    `);
+
+    if (rows.length === 0) {
       return [];
     }
-
-    const allMenus = await this.db.menu.findMany({
-      where: {
-        id: { in: menuIds },
-        estado: Estado.ACTIVO,
-      },
-      orderBy: { nombre: "asc" },
-    });
 
     const menuMap = new Map<string, MenuTreeNode>();
     const rootMenus: MenuTreeNode[] = [];
 
-    for (const menu of allMenus) {
+    for (const menu of rows) {
       menuMap.set(menu.id, {
         id: menu.id,
         nombre: menu.nombre,
         url: menu.url,
         moduleId: menu.moduleId,
         parentId: menu.parentId,
+        orden: menu.orden,
+        icono: menu.icono,
         children: [],
       });
     }
 
-    for (const menu of allMenus) {
+    for (const menu of rows) {
       const node = menuMap.get(menu.id);
       if (!node) continue;
 
       if (menu.parentId && menuMap.has(menu.parentId)) {
-        const parent: MenuTreeNode | undefined = menuMap.get(menu.parentId);
+        const parent = menuMap.get(menu.parentId);
         if (parent) {
           parent.children.push(node);
         }
@@ -455,6 +496,14 @@ export class MenuService {
       }
     }
 
+    const sortRecursive = (nodes: MenuTreeNode[]): void => {
+      nodes.sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre));
+      for (const node of nodes) {
+        sortRecursive(node.children);
+      }
+    };
+
+    sortRecursive(rootMenus);
     return rootMenus;
   }
 }

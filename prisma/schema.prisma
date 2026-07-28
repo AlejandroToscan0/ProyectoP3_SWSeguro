@@ -19,6 +19,8 @@ enum AuditAction {
   TOKEN_REVOKED
   LOGOUT
   UNAUTHORIZED_ATTEMPT
+  USER_CREATED
+  PERMISSIONS_CHANGED
 }
 
 model User {
@@ -153,6 +155,8 @@ model Menu {
   url               String?
   moduleId          String
   parentId          String?
+  orden             Int          @default(0)
+  icono             String?
   estado            Estado       @default(ACTIVO)
   fechaCreacion     DateTime     @default(now())
   fechaActualizacion DateTime    @updatedAt
@@ -165,6 +169,7 @@ model Menu {
 
   @@index([moduleId])
   @@index([parentId])
+  @@index([orden])
 }
 
 model RefreshToken {

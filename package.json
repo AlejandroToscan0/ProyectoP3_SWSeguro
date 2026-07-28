@@ -15,7 +15,12 @@
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down",
     "db:reset": "npm run prisma:push && npm run prisma:seed",
-    "smoke": "node scripts/smoke-test.mjs"
+    "smoke": "node scripts/smoke-test.mjs",
+    "frontend:dev": "npm --prefix frontend run dev",
+    "frontend:build": "npm --prefix frontend run build",
+    "frontend:preview": "npm --prefix frontend run preview",
+    "ventas:dev": "npm --prefix services/ventas run dev",
+    "ventas:build": "npm --prefix services/ventas run build"
   },
   "repository": {
     "type": "git",

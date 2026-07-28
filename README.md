@@ -12,23 +12,51 @@ Este servicio funciona como "puerta maestra" de seguridad para:
 - rotar refresh tokens;
 - validar tokens para microservicios internos.
 
-## Estado actual del proyecto (Fase 1)
+## Estado actual del proyecto
 
-### Implementado
+### Implementado (Fase A — Backend Master)
 
-- `POST /api/auth/login`
-- `POST /api/auth/select-role`
-- `POST /api/auth/refresh-token`
-- `POST /api/auth/logout`
-- `POST /api/internals/validate-token`
-- Auditoría básica y revocación de tokens
+- Autenticación completa: login, select-role, refresh, logout, validate-token
+- CRUD de usuarios, roles, módulos y menús (soft delete)
+- Asignaciones: usuarios/módulos/menús/permisos a roles
+- Menú dinámico con CTE recursiva (`GET /api/menus/tree`)
+- Validación anticiclos y regla “solo hojas con URL”
+- Rate limiting, Argon2, Zod, Helmet, auditoría básica
 - Script de prueba de humo (`npm run smoke`)
 
-### Pendiente
+### Implementado (Fase B — Frontend SPA)
 
-- CRUD completo de usuarios, roles, módulos y menús
-- Menú dinámico recursivo por rol
-- Frontend SPA
+- SPA React + Vite en `frontend/`
+- Login + Workspace Selector obligatorio
+- Tokens en `sessionStorage`, interceptor Bearer, refresh y logout
+- Rutas protegidas y pantallas 403 / sesión o token expirado
+- Menú y navegación dinámicos desde el backend
+- Pantallas admin: usuarios, roles, módulos y menús
+
+### Implementado (Fase C — Microservicio Ventas)
+
+- Microservicio hijo en `services/ventas` sin base de usuarios
+- Validación Zero Trust vía `POST /api/internals/validate-token`
+- Endpoints `GET/POST /api/ventas` con permisos `VENTAS_READ` / `VENTAS_CREATE`
+- Pantalla SPA `/app/ventas` integrada al menú dinámico
+- Retries con backoff ante cold start del Master en PaaS free tier
+
+### Implementado (Fase D — DevSecOps)
+
+- Quality Gate de SonarCloud **obligatorio** (sin `continue-on-error`)
+- SAST/ML bloquea el deploy si detecta hallazgos
+- Notificaciones Telegram: inicio de pipeline, merges a `dev`/`test`/`main`, éxito/fallo
+- CI en PRs hacia `dev`/`test` (`ci-pr.yml`)
+- Deploy a Railway vía CLI tras gates verdes
+- Guía operativa en `docs/DEVSECOPS.md`
+
+### Implementado (Fase E — Cierre)
+
+- Contrato Zero Trust alineado: `validate-token` → `{ active, userId, roleId, roleName, permissions }`
+- Auditoría de creación de usuarios y cambios de permisos
+- `sonar.qualitygate.wait=true` en el análisis
+- Pantallas 403 / sesión / token expirado cableadas
+- Matriz de cumplimiento: `docs/COMPLIANCE_CHECKLIST.md`
 
 ## Arquitectura de alto nivel
 
@@ -72,41 +100,31 @@ flowchart TD
 
 ```text
 ProyectoP3_SWSeguro/
+├── frontend/
+│   ├── src/
+│   │   ├── api/
+│   │   ├── auth/
+│   │   ├── components/
+│   │   ├── pages/
+│   │   └── routes/
+│   ├── .env.example
+│   └── README.md
 ├── src/
 │   ├── app.ts
 │   ├── server.ts
-│   ├── ai_model/
-│   │   ├── index.ts
-│   │   └── loader.ts
 │   ├── common/
-│   │   └── http-error.ts
 │   ├── config/
-│   │   ├── env.ts
-│   │   └── logger.ts
 │   ├── lib/
-│   │   └── prisma.ts
 │   ├── middlewares/
-│   │   └── error-handler.ts
 │   └── modules/
-│       ├── auth/
-│       │   ├── auth.routes.ts
-│       │   ├── auth.schemas.ts
-│       │   └── auth.service.ts
-│       └── internals/
-│           └── internals.routes.ts
 ├── prisma/
-│   ├── schema.prisma
-│   └── seed.ts
+├── services/ventas/
 ├── scripts/
-│   ├── smoke-test.mjs
-│   └── sast_scan.py
+├── docs/DEVSECOPS.md
+├── docs/COMPLIANCE_CHECKLIST.md
 ├── test/
-│   ├── auth.schemas.test.ts
-│   └── auth.service.test.ts
-├── .github/
-│   └── workflows/
-│       ├── validate-source-branch.yml
-│       └── ci-cd-pipeline.yml
+├── .github/workflows/
+├── sonar-project.properties
 ├── docker-compose.yml
 ├── .env.example
 ├── package.json
@@ -174,6 +192,29 @@ npm run dev
 - `POST /api/auth/refresh-token`
 - `POST /api/auth/logout`
 - `POST /api/internals/validate-token`
+
+## Frontend SPA
+
+```bash
+# Terminal 1 — backend Master
+npm run dev
+
+# Terminal 2 — microservicio Ventas
+cp services/ventas/.env.example services/ventas/.env
+npm run ventas:dev
+
+# Terminal 3 — frontend
+npm run frontend:dev
+```
+
+Flujo esperado en `http://localhost:5173`:
+
+1. Login con `admin@example.com` / `ChangeMe123!`
+2. Selección obligatoria de rol
+3. Navegación por menú dinámico (incluye Ventas)
+4. Cerrar sesión
+
+Más detalle en `frontend/README.md` y `services/ventas/README.md`.
 
 ## Pruebas
 
@@ -268,7 +309,9 @@ curl -X POST http://localhost:3000/api/internals/validate-token \
 
 ## Pipeline CI/CD y Despliegue
 
-El pipeline se activa automáticamente al hacer merge a `main` y ejecuta 4 fases secuenciales con notificaciones vía Telegram.
+Detalle operativo completo: [`docs/DEVSECOPS.md`](docs/DEVSECOPS.md).
+
+El pipeline de producción se activa al hacer **merge a `main`** y ejecuta build/tests → Sonar (Quality Gate duro) → SAST/ML → Railway CLI, con notificaciones Telegram.
 
 ```mermaid
 sequenceDiagram
@@ -327,23 +370,39 @@ sequenceDiagram
 
 | Fase | Descripción |
 |---|---|
-| **1. Build y Tests** | Compila TypeScript y ejecuta pruebas unitarias |
-| **2. SonarCloud** | Análisis estático Shift-Left con Quality Gate |
-| **3. Modelo ML** | SAST avanzado con `mahdin70/CodeBERT-VulnCWE` sobre archivos `.py` y `.ts` |
-| **4. Despliegue** | Zero Trust deployment en Railway |
+| **1. Build y Tests** | Compila Master/Frontend/Ventas y ejecuta pruebas unitarias |
+| **2. SonarCloud** | Análisis estático Shift-Left; **Quality Gate obligatorio** |
+| **3. Modelo ML** | SAST avanzado con `mahdin70/CodeBERT-VulnCWE` sobre `src/**/*.ts` |
+| **4. Despliegue** | Zero Trust deployment en Railway vía CLI |
 
 Si SonarCloud o el modelo ML detectan anomalías, el pipeline se detiene y se notifica al equipo por Telegram.
 
-### Variables de entorno requeridas para CI/CD
+### Workflows relacionados
 
-| Variable | Propósito |
+| Archivo | Trigger |
 |---|---|
-| `TELEGRAM_API_URL` | URL de la API de Telegram para enviar mensajes |
+| `ci-cd-deploy.yml` | Merge a `main` → pipeline completo + deploy |
+| `ci-pr.yml` | PRs a `dev`/`test` → build + tests |
+| `notify-merges.yml` | Merges a `dev`/`test`/`main` → Telegram |
+| `validate-source-branch.yml` | Política `dev→test→main` |
+
+### Secrets requeridos para CI/CD (GitHub Actions)
+
+| Secret | Propósito |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | Token del bot de Telegram |
 | `TELEGRAM_CHAT_ID` | ID del chat/grupo de Telegram |
+| `TELEGRAM_API_URL` | (Opcional) URL completa de `sendMessage` |
 | `SONAR_TOKEN` | Token de autenticación de SonarCloud |
-| `RAILWAY_TOKEN` | Token de Railway para despliegue |
+| `SONAR_PROJECT_KEY` | Clave del proyecto SonarCloud |
+| `SONAR_ORGANIZATION` | Organización SonarCloud |
+| `RAILWAY_TOKEN` | Token de Railway para despliegue CLI |
 | `RAILWAY_SERVICE` | Nombre del servicio en Railway |
-| `APP_URL` | URL pública de la aplicación desplegada |
+| `APP_URL` | URL pública (mensaje de éxito) |
+
+### Cold start en PaaS free tier
+
+Si el Master está dormido, Ventas reintenta `validate-token` con backoff y puede responder `503 MASTER_UNAVAILABLE`. Antes de la demo, conviene pegarle a `/health`. Ver `docs/DEVSECOPS.md`.
 
 ---
 
@@ -379,3 +438,15 @@ Sin el status check obligatorio, el workflow reporta fallo pero GitHub aún podr
 - Cambia secretos por valores propios.
 - No reutilices tokens de prueba en otros entornos.
 - Mantén dependencias actualizadas.
+
+## Checklist final de entrega (Fase E)
+
+Matriz completa PDF ↔ código: [`docs/COMPLIANCE_CHECKLIST.md`](docs/COMPLIANCE_CHECKLIST.md).
+
+Antes de la defensa:
+
+1. `npm run build && npm run test && npm run frontend:build && npm run ventas:build`
+2. Con Docker: `npm run db:up && npm run db:reset && npm run smoke`
+3. SPA: login → select-role → Ventas → logout
+4. Secrets de GitHub Actions + branch protection con check `source-branch-policy`
+5. Confirmar Telegram en un merge de prueba a `dev`

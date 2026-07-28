@@ -1,5 +1,8 @@
 name: CI/CD Pipeline and Deploy
 
+# Se ejecuta solo cuando un PR se fusiona a main (desde test).
+# Secuencia: build → tests → SonarCloud (Quality Gate obligatorio) → SAST/ML → deploy Railway.
+
 on:
   pull_request:
     branches: [main]
@@ -7,15 +10,24 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-cd-main
+  cancel-in-progress: false
 
 jobs:
   ci-cd:
+    name: Build, Secure and Deploy
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -23,89 +35,162 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Instalar dependencias
+      - name: Instalar dependencias Master
         run: npm ci
 
-      - name: Notificar inicio del pipeline
-        run: |
-          curl -s -X POST "${{ secrets.TELEGRAM_API_URL }}" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=Pipeline iniciado en MAIN"
+      - name: Instalar dependencias Frontend
+        run: npm --prefix frontend ci
 
-      # ──────────────────────────────
-      # Fase 1: Build y Tests
-      # ──────────────────────────────
-      - name: Build
+      - name: Instalar dependencias Ventas
+        run: npm --prefix services/ventas ci
+
+      - name: Notificar inicio del pipeline en main
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+        run: |
+          set -euo pipefail
+          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
+          curl -sS -X POST "$URL" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=🚀 Pipeline iniciado en MAIN
+          PR: #${{ github.event.pull_request.number }}
+          Autor: ${{ github.event.pull_request.user.login }}
+          Commit: ${{ github.sha }}"
+
+      - name: Build Master
         run: npm run build
 
-      - name: Tests
+      - name: Tests unitarios
+        id: unit-tests
         run: npm run test
 
-      # ──────────────────────────────
-      # Fase 2: Análisis Shift-Left (SonarCloud)
-      # ──────────────────────────────
-      - name: SonarCloud Scan
+      - name: Notificar resultado de pruebas
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+        run: |
+          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
+          curl -sS -X POST "$URL" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=✅ Build y pruebas unitarias OK en MAIN"
+
+      - name: Build Frontend
+        run: npm run frontend:build
+
+      - name: Build microservicio Ventas
+        run: npm run ventas:build
+
+      - name: Preparar sonar-project.properties
+        run: |
+          cat > sonar-project.properties <<EOF
+          sonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+          sonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+          sonar.sources=src
+          sonar.tests=test
+          sonar.sourceEncoding=UTF-8
+          sonar.exclusions=**/node_modules/**,**/dist/**,frontend/**,services/**,**/*.test.ts
+          sonar.test.inclusions=test/**/*.ts
+          sonar.qualitygate.wait=true
+          EOF
+          # Quitar indentación accidental del bloque YAML
+          sed -i 's/^[[:space:]]*//' sonar-project.properties
+
+      - name: SonarCloud Scan + Quality Gate
+        id: sonar
         uses: SonarSource/sonarcloud-github-action@v3
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        continue-on-error: true
-        id: sonar
 
-      - name: Notificar fallo de SonarCloud
-        if: steps.sonar.outcome == 'failure'
+      - name: Notificar éxito Quality Gate SonarCloud
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
         run: |
-          curl -s -X POST "${{ secrets.TELEGRAM_API_URL }}" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=SonarCloud rechazó el código"
-          exit 1
+          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
+          curl -sS -X POST "$URL" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=✅ SonarCloud Quality Gate OK en MAIN"
 
-      # ──────────────────────────────
-      # Fase 3: SAST Avanzado (Modelo ML)
-      # ──────────────────────────────
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Instalar dependencias Python (ML)
+      - name: Instalar dependencias Python (ML/SAST)
         run: |
+          pip install --upgrade pip
           pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
           pip install transformers sentencepiece
 
-      - name: Ejecutar análisis SAST con CodeBERT-VulnCWE
+      - name: Análisis SAST avanzado (CodeBERT/ML)
         id: ml-scan
         run: python scripts/sast_scan.py
         env:
           ML_MODEL_NAME: ${{ vars.ML_MODEL_NAME || 'mahdin70/CodeBERT-VulnCWE' }}
 
-      - name: Notificar alerta de vulnerabilidad
-        if: steps.ml-scan.outputs.vulnerable == 'true'
+      - name: Notificar resultado SAST/ML
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
         run: |
-          curl -s -X POST "${{ secrets.TELEGRAM_API_URL }}" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=ALERTA: Modelo ML detectó patrón sospechoso en el código"
-          exit 1
+          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
+          if [ "${{ steps.ml-scan.outputs.vulnerable }}" = "true" ]; then
+            curl -sS -X POST "$URL" \
+              -d "chat_id=${TELEGRAM_CHAT_ID}" \
+              --data-urlencode "text=🚨 ALERTA: Modelo ML detectó patrones sospechosos. Deploy bloqueado."
+            exit 1
+          fi
+          curl -sS -X POST "$URL" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=✅ Análisis ML/SAST sin hallazgos críticos"
 
-      # ──────────────────────────────
-      # Fase 4: Despliegue (Zero Trust Pipeline)
-      # ──────────────────────────────
-      - name: Notificar despliegue
-        if: steps.ml-scan.outputs.vulnerable != 'true'
+      - name: Notificar inicio de despliegue
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
         run: |
-          curl -s -X POST "${{ secrets.TELEGRAM_API_URL }}" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=Seguridad validada. Desplegando..."
+          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
+          curl -sS -X POST "$URL" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=📦 Seguridad validada. Desplegando a Railway vía CLI..."
 
-      - name: Desplegar en Railway
-        if: steps.ml-scan.outputs.vulnerable != 'true'
+      - name: Desplegar en Railway (CLI)
+        id: deploy
         run: |
-          npx railway up --service ${{ secrets.RAILWAY_SERVICE }}
+          set -euo pipefail
+          npm install -g @railway/cli
+          railway up --service "${{ secrets.RAILWAY_SERVICE }}" --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
       - name: Notificar despliegue exitoso
-        if: steps.ml-scan.outputs.vulnerable != 'true'
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
         run: |
-          curl -s -X POST "${{ secrets.TELEGRAM_API_URL }}" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=Despliegue en producción exitoso. URL: ${{ secrets.APP_URL }}"
+          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
+          curl -sS -X POST "$URL" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=✅ Despliegue en producción exitoso
+          URL: ${{ secrets.APP_URL }}"
+
+      - name: Notificar fallo del pipeline
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_API_URL: ${{ secrets.TELEGRAM_API_URL }}
+        run: |
+          URL="${TELEGRAM_API_URL:-https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage}"
+          curl -sS -X POST "$URL" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=❌ Pipeline MAIN falló. Revisar Actions: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

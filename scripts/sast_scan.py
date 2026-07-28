@@ -1,77 +1,83 @@
 """
 SAST Scan con CodeBERT-VulnCWE
 
-Analiza archivos .py y .ts del repositorio usando el modelo
-mahdin70/CodeBERT-VulnCWE y reporta si se encontraron vulnerabilidades.
+Analiza archivos .ts del Master (src/) buscando patrones sospechosos.
+Exit code:
+  0 = seguro
+  1 = vulnerable / error de ejecución
 """
+
+from __future__ import annotations
 
 import os
 import sys
-import json
-import glob
 from pathlib import Path
 
-try:
-    import torch
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
-except ImportError:
-    print("Error: faltan dependencias. Ejecuta: pip install torch transformers")
-    sys.exit(1)
 
 MODEL_NAME = os.getenv("ML_MODEL_NAME", "mahdin70/CodeBERT-VulnCWE")
-THRESHOLD = 0.5
-EXTENSIONS = (".py", ".ts")
 SCAN_DIRS = ["src"]
+EXTENSIONS = {".ts"}
 
 
-def scan_file(filepath: str, model, tokenizer) -> bool:
-    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-        code = f.read()
+def write_output(vulnerable: bool) -> None:
+    github_output = os.environ.get("GITHUB_OUTPUT")
+    if not github_output:
+        return
+    with open(github_output, "a", encoding="utf-8") as handle:
+        handle.write(f"vulnerable={'true' if vulnerable else 'false'}\n")
 
+
+def scan_file(filepath: Path, model, tokenizer) -> bool:
+    code = filepath.read_text(encoding="utf-8", errors="ignore")
     if not code.strip():
         return False
 
     inputs = tokenizer(code, return_tensors="pt", truncation=True, max_length=512)
     outputs = model(**inputs)
-
     vul_logits = outputs.logits[:, :2]
     probs = vul_logits.softmax(dim=1)
-    vul_prob = probs[0, 1].item()
-
+    vul_prob = float(probs[0, 1].item())
     return vul_prob > 0.5
 
 
-def main():
-    import torch
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+def main() -> int:
+    try:
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+    except ImportError:
+        print("Error: faltan dependencias. Ejecuta: pip install torch transformers")
+        write_output(True)
+        return 1
 
-    model_name = os.getenv("ML_MODEL_NAME", "mahdin70/CodeBERT-VulnCWE")
-
-    print(f"Cargando modelo {model_name}...")
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSequenceClassification.from_pretrained(model_name)
+    print(f"Cargando modelo {MODEL_NAME}...")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
     model.eval()
 
-    vulnerable_files = []
+    vulnerable_files: list[str] = []
 
     for scan_dir in SCAN_DIRS:
-        for root, _dirs, files in os.walk(scan_dir):
-            for file in files:
-                if not (file.endswith(".py") or file.endswith(".ts")):
-                    continue
-                path = os.path.join(root, file)
-                print(f"  Escaneando: {path}")
-                try:
-                    if scan_file(path, model, tokenizer):
-                        vulnerable_files.append(path)
-                except Exception as e:
-                    print(f"  Error escaneando {path}: {e}")
+        root = Path(scan_dir)
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix not in EXTENSIONS:
+                continue
+            print(f"  Escaneando: {path}")
+            try:
+                if scan_file(path, model, tokenizer):
+                    vulnerable_files.append(str(path))
+            except Exception as exc:  # noqa: BLE001
+                print(f"  Error escaneando {path}: {exc}")
 
     if vulnerable_files:
         print(f"Vulnerabilidades detectadas en: {vulnerable_files}")
-        with open(os.environ.get("GITHUB_OUTPUT", ""), "a") as f:
-            f.write("vulnerable=true\n")
-    else:
-        print("0 Anomalías detectadas")
-        with open(os.environ.get("GITHUB_OUTPUT", ""), "a") as f:
-            f.write("vulnerable=false\n")
+        write_output(True)
+        return 1
+
+    print("0 Anomalías detectadas")
+    write_output(False)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
