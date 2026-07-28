@@ -1,71 +1,45 @@
 # Master Gateway de Autenticación y Autorización
 
-Sistema académico para centralizar autenticación y autorización por roles en una arquitectura de microservicios, con enfoque de seguridad Zero Trust.
+Sistema académico Full-Stack para centralizar autenticación y autorización por roles en una arquitectura de microservicios, con enfoque **Zero Trust**, **Least Privilege** y **Shift-Left Security**.
 
 ## Objetivo
 
-Este servicio funciona como "puerta maestra" de seguridad para:
+El Master Gateway actúa como puerta maestra de seguridad para:
 
 - validar credenciales de usuario;
 - forzar selección de rol después del login;
-- emitir tokens con permisos mínimos por rol activo;
-- rotar refresh tokens;
-- validar tokens para microservicios internos.
+- emitir JWT limitado al rol seleccionado y sus permisos mínimos;
+- rotar refresh tokens y revocar sesiones;
+- validar tokens para microservicios hijos (p. ej. Ventas);
+- administrar usuarios, roles, módulos, menús y permisos con soft delete y auditoría.
 
-## Estado actual del proyecto
+## Estado del proyecto (completo)
 
-### Implementado (Fase A — Backend Master)
+| Fase | Alcance | Estado |
+| --- | --- | --- |
+| **A** | Backend Master (auth, CRUD, menú CTE, seguridad) | Completo |
+| **B** | Frontend SPA (login, selector de rol, admin, menú dinámico) | Completo |
+| **C** | Microservicio Ventas (Zero Trust) | Completo |
+| **D** | DevSecOps (CI/CD, Sonar, SAST/ML, Telegram, Railway) | Completo |
+| **E** | Cierre (checklist, smoke E2E, informe) | Completo |
 
-- Autenticación completa: login, select-role, refresh, logout, validate-token
-- CRUD de usuarios, roles, módulos y menús (soft delete)
-- Asignaciones: usuarios/módulos/menús/permisos a roles
-- Menú dinámico con CTE recursiva (`GET /api/menus/tree`)
-- Validación anticiclos y regla “solo hojas con URL”
-- Rate limiting, Argon2, Zod, Helmet, auditoría básica
-- Script de prueba de humo (`npm run smoke`)
+### Destacados recientes
 
-### Implementado (Fase B — Frontend SPA)
-
-- SPA React + Vite en `frontend/`
-- Login + Workspace Selector obligatorio
-- Tokens en `sessionStorage`, interceptor Bearer, refresh y logout
-- Rutas protegidas y pantallas 403 / sesión o token expirado
-- Menú y navegación dinámicos desde el backend
-- Pantallas admin: usuarios, roles, módulos y menús
-
-### Implementado (Fase C — Microservicio Ventas)
-
-- Microservicio hijo en `services/ventas` sin base de usuarios
-- Validación Zero Trust vía `POST /api/internals/validate-token`
-- Endpoints `GET/POST /api/ventas` con permisos `VENTAS_READ` / `VENTAS_CREATE`
-- Pantalla SPA `/app/ventas` integrada al menú dinámico
-- Retries con backoff ante cold start del Master en PaaS free tier
-
-### Implementado (Fase D — DevSecOps)
-
-- Quality Gate de SonarCloud **obligatorio** (sin `continue-on-error`)
-- SAST/ML bloquea el deploy si detecta hallazgos
-- Notificaciones Telegram: inicio de pipeline, merges a `dev`/`test`/`main`, éxito/fallo
-- CI en PRs hacia `dev`/`test` (`ci-pr.yml`)
-- Deploy a Railway vía CLI tras gates verdes
-- Guía operativa en `docs/DEVSECOPS.md`
-
-### Implementado (Fase E — Cierre)
-
-- Contrato Zero Trust alineado: `validate-token` → `{ active, userId, roleId, roleName, permissions }`
-- Auditoría de creación de usuarios y cambios de permisos
-- `sonar.qualitygate.wait=true` en el análisis
-- Pantallas 403 / sesión / token expirado cableadas
-- Matriz de cumplimiento: `docs/COMPLIANCE_CHECKLIST.md`
+- Administración dinámica de **roles** y **usuarios** desde la SPA (plantillas VENDEDOR/AUDITOR)
+- Selector de rol con **Cancelar / otro usuario**
+- `GET /api/menus/tree` disponible para cualquier sesión autenticada (navegación por rol; `MENUS_READ` solo para CRUD)
+- Seed demo: roles `VENDEDOR` / `AUDITOR` + usuarios de prueba
+- Documentación en `docs/` (DevSecOps, checklist, informe LaTeX)
 
 ## Arquitectura de alto nivel
 
 ```mermaid
 flowchart LR
-    U[Usuario / Frontend] --> MG[Master Gateway API]
+    U[Usuario / Frontend SPA] --> MG[Master Gateway API]
     MG --> DB[(PostgreSQL)]
-    SVC[Microservicio Hijo] -->|x-internal-api-key + token| MG
-    SVC -->|solo si token válido| SVCBUS[Lógica de negocio]
+    SPA[SPA React] --> V[Microservicio Ventas]
+    V -->|x-internal-api-key + Bearer token| MG
+    V -->|solo si token válido| BUS[Lógica de negocio]
 ```
 
 ## Flujo principal de autenticación
@@ -76,12 +50,14 @@ flowchart TD
     B --> C{Credenciales válidas}
     C -- No --> D[401 Credenciales inválidas]
     C -- Sí --> E[Retorna tempToken + roles]
-    E --> F[Usuario selecciona rol]
+    E --> F[Selector obligatorio de rol]
     F --> G[POST /api/auth/select-role]
     G --> H{Rol pertenece al usuario y está activo}
     H -- No --> I[403 Rol no permitido]
-    H -- Sí --> J[Retorna accessToken + refreshToken + permisos]
+    H -- Sí --> J[accessToken + refreshToken + permisos del rol]
 ```
+
+El JWT definitivo **no** incluye todos los roles del usuario: solo el rol activo y sus permisos.
 
 ## Flujo de renovación y cierre de sesión
 
@@ -89,41 +65,29 @@ flowchart TD
 flowchart TD
     R1[Cliente envía refreshToken] --> R2[POST /api/auth/refresh-token]
     R2 --> R3{Refresh válido, no revocado, no expirado}
-    R3 -- No --> R4[401 y auditoría de intento]
+    R3 -- No --> R4[401 y auditoría]
     R3 -- Sí --> R5[Rotación de refresh token]
     R5 --> R6[Nuevo accessToken + refreshToken]
-    L1[Cliente solicita logout] --> L2[POST /api/auth/logout]
-    L2 --> L3[Revoca refresh y access token por jti]
+    L1[Logout] --> L2[POST /api/auth/logout]
+    L2 --> L3[Revoca refresh y access por jti]
 ```
 
 ## Estructura del proyecto
 
 ```text
 ProyectoP3_SWSeguro/
-├── frontend/
-│   ├── src/
-│   │   ├── api/
-│   │   ├── auth/
-│   │   ├── components/
-│   │   ├── pages/
-│   │   └── routes/
-│   ├── .env.example
-│   └── README.md
-├── src/
-│   ├── app.ts
-│   ├── server.ts
-│   ├── common/
-│   ├── config/
-│   ├── lib/
-│   ├── middlewares/
-│   └── modules/
-├── prisma/
-├── services/ventas/
-├── scripts/
-├── docs/DEVSECOPS.md
-├── docs/COMPLIANCE_CHECKLIST.md
-├── test/
-├── .github/workflows/
+├── frontend/                 # SPA React + Vite
+├── src/                      # Master Gateway (Express + TS)
+├── prisma/                   # Schema, seed, seed demo roles
+├── services/ventas/          # Microservicio hijo
+├── scripts/                  # smoke + SAST ML
+├── test/                     # Pruebas Vitest
+├── docs/
+│   ├── DEVSECOPS.md
+│   ├── COMPLIANCE_CHECKLIST.md
+│   ├── informe_proyecto.tex
+│   └── informe_proyecto_cuerpo.tex
+├── .github/workflows/        # CI/CD y política de ramas
 ├── sonar-project.properties
 ├── docker-compose.yml
 ├── .env.example
@@ -133,60 +97,83 @@ ProyectoP3_SWSeguro/
 
 ## Requisitos previos
 
-- Node.js 20 o superior
+- Node.js 20+
 - npm
-- Docker Desktop (recomendado) o PostgreSQL 14+ instalado localmente
+- Docker Desktop (recomendado) o PostgreSQL 14+
 
-## Configuración inicial (paso a paso)
+## Scripts útiles
 
-1. Clona el repositorio y entra a la carpeta.
-1. Crea el archivo de entorno:
+| Script | Descripción |
+| --- | --- |
+| `npm run dev` | Master en modo desarrollo |
+| `npm run build` / `npm run test` | Build y tests del Master |
+| `npm run db:up` / `db:down` / `db:reset` | Postgres Docker + push/seed |
+| `npm run seed:demo-roles` | Roles/usuarios demo (VENDEDOR, AUDITOR) |
+| `npm run smoke` | Prueba de humo E2E del Master |
+| `npm run frontend:dev` / `frontend:build` | SPA |
+| `npm run ventas:dev` / `ventas:build` | Microservicio Ventas |
+
+## Configuración inicial
 
 ```bash
 cp .env.example .env
+# Ajusta DATABASE_URL, JWT_*_SECRET, INTERNAL_API_KEY (≥32 chars)
+npm install
+npm --prefix frontend install
+npm --prefix services/ventas install
 ```
 
-1. Abre `.env` y ajusta como mínimo:
-   - `DATABASE_URL`
-   - `JWT_ACCESS_SECRET`
-   - `JWT_TEMP_SECRET`
-   - `INTERNAL_API_KEY`
-
-Importante: usa secretos largos, únicos y privados.
-
-## Arranque rápido recomendado (con Docker)
+## Arranque rápido (Docker)
 
 ```bash
-cp .env.example .env
-npm install
 npm run db:up
 npm run prisma:generate
-npm run db:reset
-npm run dev
+npm run db:reset          # incluye seed + roles demo
+npm run dev               # Master :3000
+npm run ventas:dev        # Ventas :3001  (otro terminal)
+npm run frontend:dev      # SPA :5173     (otro terminal)
 ```
 
-Nota: el Postgres de Docker usa el puerto host **5433** (`localhost:5433`) para no chocar con un Postgres local en `5432`.
+Antes de Ventas:
 
-Para apagar la base de datos:
+```bash
+cp services/ventas/.env.example services/ventas/.env
+# INTERNAL_API_KEY debe coincidir con el Master
+```
+
+**Nota:** el Postgres de Docker usa el puerto host **5433** (`localhost:5433`) para no chocar con un Postgres local en `5432`.
+
+Apagar DB:
 
 ```bash
 npm run db:down
 ```
 
-## Arranque manual (sin Docker)
+## Usuarios y roles demo
 
-Si ya tienes PostgreSQL local funcionando:
+| Email | Password | Roles |
+| --- | --- | --- |
+| `admin@example.com` | `ChangeMe123!` | ADMIN, VENDEDOR, AUDITOR |
+| `vendedor@example.com` | `ChangeMe123!` | VENDEDOR |
+| `auditor@example.com` | `ChangeMe123!` | AUDITOR |
 
-```bash
-cp .env.example .env
-npm install
-npm run prisma:generate
-npm run prisma:push
-npm run prisma:seed
-npm run dev
-```
+Regenerar solo demos: `npm run seed:demo-roles`
 
-## Endpoints disponibles en esta fase
+## Frontend SPA (`http://localhost:5173`)
+
+1. Login
+2. Selección obligatoria de rol (puedes **Cancelar / otro usuario**)
+3. Menú dinámico según rol (CTE filtrada por JWT)
+4. **Roles**: crear, plantillas, asignar usuarios/permisos/módulos/menús
+5. **Usuarios**: alta rápida con rol inicial
+6. **Ventas** (si el rol tiene permisos)
+7. Logout / pantallas 403, sesión o token expirado
+
+Más detalle: `frontend/README.md` y `services/ventas/README.md`.
+
+## Endpoints principales
+
+### Auth e interno
 
 - `GET /health`
 - `POST /api/auth/login`
@@ -195,271 +182,146 @@ npm run dev
 - `POST /api/auth/logout`
 - `POST /api/internals/validate-token`
 
-## Frontend SPA
+### Administración
 
-```bash
-# Terminal 1 — backend Master
-npm run dev
+- CRUD `/api/users`
+- CRUD `/api/roles` + assign `users` / `modules` / `menus` / `permissions`
+- `GET /api/roles/{id}` (detalle con asignaciones)
+- CRUD `/api/modules`
+- CRUD `/api/menus` + `GET /api/menus/tree`
+- `GET /api/permissions`
 
-# Terminal 2 — microservicio Ventas
-cp services/ventas/.env.example services/ventas/.env
-npm run ventas:dev
+### Ventas (puerto 3001)
 
-# Terminal 3 — frontend
-npm run frontend:dev
-```
-
-Flujo esperado en `http://localhost:5173`:
-
-1. Login con `admin@example.com` / `ChangeMe123!`
-2. Selección obligatoria de rol (`ADMIN`, `VENDEDOR` o `AUDITOR` tras el seed demo)
-3. Navegación por menú dinámico (incluye Ventas)
-4. En **Roles**: crear roles, aplicar plantillas y asignar usuarios/permisos/menús
-5. En **Usuarios**: alta rápida con rol inicial
-6. Cerrar sesión
-
-Usuarios demo adicionales (seed):
-
-| Email | Password | Rol |
-| --- | --- | --- |
-| `vendedor@example.com` | `ChangeMe123!` | VENDEDOR |
-| `auditor@example.com` | `ChangeMe123!` | AUDITOR |
-
-Para regenerar solo roles demo: `npm run seed:demo-roles`
-
-Más detalle en `frontend/README.md` y `services/ventas/README.md`.
+- `GET /api/ventas` → `VENTAS_READ`
+- `POST /api/ventas` → `VENTAS_CREATE`
 
 ## Pruebas
 
-### Build + unit tests
-
 ```bash
-npm run build
-npm run test
+npm run build && npm run test
+npm run frontend:build
+npm run ventas:build
+
+# Con Master arriba:
+INTERNAL_API_KEY=<mismo_del_.env> npm run smoke
 ```
 
-### Prueba de humo (flujo completo)
+El smoke valida health → login → select-role → refresh → validate-token → logout → rechazo de token revocado.
 
-Con el servidor corriendo:
-
-```bash
-INTERNAL_API_KEY=change_internal_api_key_min_32_chars npm run smoke
-```
-
-El smoke test valida:
-
-- salud del servicio;
-- login;
-- selección de rol;
-- renovación de token;
-- validación interna;
-- logout;
-- rechazo de token revocado.
-
-## Verificación manual con curl
-
-### Salud del servicio
+## Verificación rápida con curl
 
 ```bash
 curl http://localhost:3000/health
-```
 
-### Login
-
-```bash
 curl -X POST http://localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@example.com","password":"ChangeMe123!"}'
 ```
 
-### Selección de rol
+## Variables de entorno importantes
 
-```bash
-curl -X POST http://localhost:3000/api/auth/select-role \
-  -H "Content-Type: application/json" \
-  -d '{"tempToken":"<TEMP_TOKEN>","roleId":"<ROLE_ID>"}'
-```
+| Variable | Uso |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL (Docker: puerto `5433`) |
+| `JWT_ACCESS_SECRET` / `JWT_TEMP_SECRET` | Firma de tokens |
+| `INTERNAL_API_KEY` | Validate-token entre Master y Ventas |
+| `JWT_ISSUER` / `JWT_AUDIENCE` | Claims JWT |
+| `ACCESS_TOKEN_TTL_SECONDS` / `TEMP_TOKEN_TTL_SECONDS` / `REFRESH_TOKEN_TTL_DAYS` | TTLs |
 
-### Renovar token
+## Pipeline CI/CD y despliegue
 
-```bash
-curl -X POST http://localhost:3000/api/auth/refresh-token \
-  -H "Content-Type: application/json" \
-  -d '{"refreshToken":"<REFRESH_TOKEN>"}'
-```
+Detalle: [`docs/DEVSECOPS.md`](docs/DEVSECOPS.md).
 
-### Logout
-
-```bash
-curl -X POST http://localhost:3000/api/auth/logout \
-  -H "Content-Type: application/json" \
-  -d '{"accessToken":"<ACCESS_TOKEN>","refreshToken":"<REFRESH_TOKEN>"}'
-```
-
-### Validación interna (microservicios)
-
-```bash
-curl -X POST http://localhost:3000/api/internals/validate-token \
-  -H "Content-Type: application/json" \
-  -H "x-internal-api-key: <INTERNAL_API_KEY>" \
-  -d '{"token":"<ACCESS_TOKEN>","requiredPermissions":["AUTH_LOGIN"]}'
-```
-
-## Variables de entorno más importantes
-
-- `DATABASE_URL`: conexión a PostgreSQL.
-- `JWT_ACCESS_SECRET`: firma del access token.
-- `JWT_TEMP_SECRET`: firma del token temporal.
-- `INTERNAL_API_KEY`: llave para endpoint interno de validación.
-- `ACCESS_TOKEN_TTL_SECONDS`, `TEMP_TOKEN_TTL_SECONDS`, `REFRESH_TOKEN_TTL_DAYS`: duración de tokens.
-
-## Guía rápida para personas no técnicas
-
-- Si aparece error de base de datos, normalmente la base no está encendida o la URL está mal.
-- Si aparece error de token, suele ser token incompleto, expirado o ya revocado.
-- Si aparece `401`, faltan credenciales o no son válidas.
-- Si aparece `403`, el usuario sí existe, pero no tiene permisos para esa acción.
-
-## Pipeline CI/CD y Despliegue
-
-Detalle operativo completo: [`docs/DEVSECOPS.md`](docs/DEVSECOPS.md).
-
-El pipeline de producción se activa al hacer **merge a `main`** y ejecuta build/tests → Sonar (Quality Gate duro) → SAST/ML → Railway CLI, con notificaciones Telegram.
+Merge a **`main`** → build/tests → Sonar Quality Gate (**obligatorio**) → SAST/ML → Railway CLI → Telegram.
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor Dev as Desarrollador
     participant GH as GitHub
-    participant GHA as GitHub Actions (Runner)
+    participant GHA as GitHub Actions
     participant SC as SonarCloud
-    participant ML as Modelo SAST (ML/Data Mining)
-    participant TG as Telegram API
-    participant RR as Railway / Render
+    participant ML as SAST ML
+    participant TG as Telegram
+    participant RR as Railway
 
-    Dev->>GH: Merge Pull Request a rama 'main'
-    GH->>GHA: Trigger Workflow (Solo en main)
-    GHA->>TG: "🚀 Pipeline iniciado en MAIN"
-    TG-->>Dev: Notificación recibida
-
-    rect rgb(255, 253, 230)
-    note over GHA: Fase 1: Build y Tests
-    GHA->>GHA: npm run build / npm run test
+    Dev->>GH: Merge PR a main
+    GH->>GHA: Trigger pipeline
+    GHA->>TG: Pipeline iniciado
+    GHA->>GHA: Build + tests
+    GHA->>SC: Quality Gate
+    alt QG fallido
+        GHA->>TG: Sonar rechazó
+        GHA-->>Dev: Fail
     end
-
-    rect rgb(255, 253, 230)
-    note over GHA: Fase 2: Análisis Shift-Left (SonarCloud)
-    GHA->>SC: sonar-scanner
-    SC-->>GHA: Quality Gate PASSED/FAILED
+    GHA->>ML: CodeBERT scan
+    alt Hallazgo ML
+        GHA->>TG: Alerta seguridad
+        GHA-->>Dev: Fail
     end
-
-    alt Quality Gate FAILED
-        GHA->>TG: "❌ SonarCloud rechazó el código"
-        GHA-->>Dev: Job Failed (Se detiene el pipeline)
-    end
-
-    rect rgb(255, 253, 230)
-    note over GHA: Fase 3: SAST Avanzado (Modelo ML)
-    GHA->>ML: Ejecuta análisis con CodeBERT-VulnCWE
-    ML-->>GHA: 0 Anomalías detectadas
-    end
-
-    alt Vulnerabilidad detectada por ML
-        GHA->>TG: "⚠️ ALERTA: Modelo ML detectó patrón sospechoso"
-        GHA-->>Dev: Job Failed (Se detiene el pipeline)
-    end
-
-    rect rgb(255, 253, 230)
-    note over GHA: Fase 4: Despliegue (Zero Trust Pipeline)
-    GHA->>TG: "🚀 Seguridad validada. Desplegando..."
     GHA->>RR: railway up
-    RR-->>GHA: Deploy Successful
-    GHA->>TG: "🎉 Despliegue en producción exitoso"
-    TG-->>Dev: Notificación de éxito
-    end
+    GHA->>TG: Deploy exitoso
 ```
 
-### Fases del pipeline
-
-| Fase | Descripción |
-| --- | --- |
-| **1. Build y Tests** | Compila Master/Frontend/Ventas y ejecuta pruebas unitarias |
-| **2. SonarCloud** | Análisis estático Shift-Left; **Quality Gate obligatorio** |
-| **3. Modelo ML** | SAST avanzado con `mahdin70/CodeBERT-VulnCWE` sobre `src/**/*.ts` |
-| **4. Despliegue** | Zero Trust deployment en Railway vía CLI |
-
-Si SonarCloud o el modelo ML detectan anomalías, el pipeline se detiene y se notifica al equipo por Telegram.
-
-### Workflows relacionados
+### Workflows
 
 | Archivo | Trigger |
 | --- | --- |
-| `ci-cd-deploy.yml` | Merge a `main` → pipeline completo + deploy |
+| `ci-cd-deploy.yml` | Merge a `main` → pipeline + deploy |
 | `ci-pr.yml` | PRs a `dev`/`test` → build + tests |
 | `notify-merges.yml` | Merges a `dev`/`test`/`main` → Telegram |
-| `validate-source-branch.yml` | Política `dev→test→main` |
+| `validate-source-branch.yml` | Solo `test→main` y `dev→test` |
 
-### Secrets requeridos para CI/CD (GitHub Actions)
+### Secrets de GitHub Actions
 
-| Secret | Propósito |
-| --- | --- |
-| `TELEGRAM_BOT_TOKEN` | Token del bot de Telegram |
-| `TELEGRAM_CHAT_ID` | ID del chat/grupo de Telegram |
-| `TELEGRAM_API_URL` | (Opcional) URL completa de `sendMessage` |
-| `SONAR_TOKEN` | Token de autenticación de SonarCloud |
-| `SONAR_PROJECT_KEY` | Clave del proyecto SonarCloud |
-| `SONAR_ORGANIZATION` | Organización SonarCloud |
-| `RAILWAY_TOKEN` | Token de Railway para despliegue CLI |
-| `RAILWAY_SERVICE` | Nombre del servicio en Railway |
-| `APP_URL` | URL pública (mensaje de éxito) |
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SONAR_TOKEN`, `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION`, `RAILWAY_TOKEN`, `RAILWAY_SERVICE`, `APP_URL`  
+(Opcional: `TELEGRAM_API_URL`)
 
-### Cold start en PaaS free tier
+### Dónde desplegar
 
-Si el Master está dormido, Ventas reintenta `validate-token` con backoff y puede responder `503 MASTER_UNAVAILABLE`. Antes de la demo, conviene pegarle a `/health`. Ver `docs/DEVSECOPS.md`.
+Recomendado: **Railway** (ya cableado en el pipeline). Alternativa: **Render**.  
+Antes de demos en free tier, llama a `GET /health` (cold start). Ventas reintenta `validate-token` con backoff.
 
----
-
-## Política de ramas (protección)
-
-Flujo permitido:
+## Política de ramas
 
 ```text
 feature/*  →  dev  →  test  →  main
 ```
 
-Reglas aplicadas por el workflow `.github/workflows/validate-source-branch.yml`:
+- `main` solo desde `test`
+- `test` solo desde `dev`
 
-- `main` solo acepta Pull Requests desde `test`
-- `test` solo acepta Pull Requests desde `dev`
-- no se permiten Pull Requests desde forks externos
+Activa en GitHub branch protection el status check **`source-branch-policy`**.
 
-### Cómo dejar el bloqueo efectivo en GitHub
+## Documentación adicional
 
-1. Protege las ramas `main` y `test` (Settings → Branches → Branch protection rules).
-2. Activa:
-   - Require a pull request before merging
-   - Require status checks to pass before merging
-   - Status check obligatorio: `source-branch-policy`
-   - Do not allow bypassing the above settings (si está disponible)
-3. Restringe push directo a `main` y `test` (idealmente nadie puede hacer push; solo merge por PR).
+| Documento | Contenido |
+| --- | --- |
+| [`docs/DEVSECOPS.md`](docs/DEVSECOPS.md) | Pipeline, secrets, Railway, cold start |
+| [`docs/COMPLIANCE_CHECKLIST.md`](docs/COMPLIANCE_CHECKLIST.md) | Matriz PDF ↔ código |
+| [`docs/informe_proyecto.tex`](docs/informe_proyecto.tex) | Informe técnico LaTeX completo |
+| [`docs/informe_proyecto_cuerpo.tex`](docs/informe_proyecto_cuerpo.tex) | Cuerpo para `\input` en otro `.tex` |
 
-Sin el status check obligatorio, el workflow reporta fallo pero GitHub aún podría permitir el merge.
+Compilar informe:
 
-## Seguridad mínima recomendada en desarrollo
+```bash
+pdflatex docs/informe_proyecto.tex
+# o
+pandoc docs/informe_proyecto.tex -o informe.docx
+```
 
-- Nunca subas `.env` al repositorio.
-- Cambia secretos por valores propios.
-- No reutilices tokens de prueba en otros entornos.
-- Mantén dependencias actualizadas.
-
-## Checklist final de entrega (Fase E)
-
-Matriz completa PDF ↔ código: [`docs/COMPLIANCE_CHECKLIST.md`](docs/COMPLIANCE_CHECKLIST.md).
-
-Antes de la defensa:
+## Checklist de defensa
 
 1. `npm run build && npm run test && npm run frontend:build && npm run ventas:build`
-2. Con Docker: `npm run db:up && npm run db:reset && npm run smoke`
-3. SPA: login → select-role → Ventas → logout
-4. Secrets de GitHub Actions + branch protection con check `source-branch-policy`
-5. Confirmar Telegram en un merge de prueba a `dev`
+2. `npm run db:up && npm run db:reset && npm run smoke`
+3. SPA: login → select-role (probar VENDEDOR) → Ventas → cancelar selector / logout
+4. Secrets Actions + branch protection + Telegram en un merge a `dev`
+5. URL pública en Railway (si aplica) + `/health`
+
+## Seguridad en desarrollo
+
+- Nunca subas `.env` al repositorio.
+- Cambia secretos demo antes de cualquier entorno compartido.
+- No reutilices tokens de prueba en producción.
+- Mantén dependencias actualizadas.
