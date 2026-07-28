@@ -4,6 +4,7 @@ import type {
   MenuTreeNode,
   Paginated,
   RoleDetail,
+  RoleOption,
   SafeMenu,
   SafeModule,
   SafePermission,
@@ -27,6 +28,18 @@ export const authApi = {
       auth: false,
     });
   },
+  switchRole(roleId: string, refreshToken?: string | null) {
+    return apiRequest<SelectRoleResponse>("/api/auth/switch-role", {
+      method: "POST",
+      body: {
+        roleId,
+        ...(refreshToken ? { refreshToken } : {}),
+      },
+    });
+  },
+  myRoles() {
+    return apiRequest<{ roles: RoleOption[]; activeRoleId: string }>("/api/auth/my-roles");
+  },
   logout(accessToken?: string | null, refreshToken?: string | null) {
     return apiRequest<{ success: true }>("/api/auth/logout", {
       method: "POST",
@@ -44,8 +57,11 @@ export const menusApi = {
   tree() {
     return apiRequest<MenuTreeNode[]>("/api/menus/tree");
   },
-  list() {
-    return apiRequest<Paginated<SafeMenu>>("/api/menus?limit=100");
+  list(params?: { moduleId?: string; limit?: number }) {
+    const query = new URLSearchParams();
+    query.set("limit", String(params?.limit ?? 100));
+    if (params?.moduleId) query.set("moduleId", params.moduleId);
+    return apiRequest<Paginated<SafeMenu>>(`/api/menus?${query.toString()}`);
   },
   create(input: {
     nombre: string;
@@ -59,6 +75,9 @@ export const menusApi = {
       method: "POST",
       body: input,
     });
+  },
+  remove(id: string) {
+    return apiRequest<SafeMenu>(`/api/menus/${id}`, { method: "DELETE" });
   },
 };
 
@@ -107,6 +126,11 @@ export const rolesApi = {
       body: { permissionId },
     });
   },
+  removePermission(roleId: string, permissionId: string) {
+    return apiRequest<{ success: true }>(`/api/roles/${roleId}/permissions/${permissionId}`, {
+      method: "DELETE",
+    });
+  },
   assignModule(roleId: string, moduleId: string) {
     return apiRequest<{ success: true }>(`/api/roles/${roleId}/modules`, {
       method: "POST",
@@ -125,17 +149,45 @@ export const permissionsApi = {
   list() {
     return apiRequest<{ data: SafePermission[] }>("/api/permissions");
   },
+  create(input: { codigo: string; descripcion?: string }) {
+    return apiRequest<SafePermission>("/api/permissions", {
+      method: "POST",
+      body: input,
+    });
+  },
 };
 
 export const modulesApi = {
   list() {
     return apiRequest<Paginated<SafeModule>>("/api/modules?limit=100");
   },
-  create(input: { nombre: string; descripcion?: string }) {
+  create(input: {
+    nombre: string;
+    descripcion?: string;
+    baseUrl?: string | null;
+    healthPath?: string | null;
+  }) {
     return apiRequest<SafeModule>("/api/modules", {
       method: "POST",
       body: input,
     });
+  },
+  update(
+    id: string,
+    input: {
+      nombre?: string;
+      descripcion?: string | null;
+      baseUrl?: string | null;
+      healthPath?: string | null;
+    },
+  ) {
+    return apiRequest<SafeModule>(`/api/modules/${id}`, {
+      method: "PUT",
+      body: input,
+    });
+  },
+  remove(id: string) {
+    return apiRequest<SafeModule>(`/api/modules/${id}`, { method: "DELETE" });
   },
 };
 

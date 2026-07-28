@@ -1,4 +1,5 @@
 import { Estado, Prisma, type PrismaClient } from "@prisma/client";
+import { canAccessMenuUrl } from "../../common/menu-access.js";
 import { HttpError } from "../../common/http-error.js";
 import type { CreateMenuInput, UpdateMenuInput, AssignMenuToRoleInput, ListMenusInput } from "./menus.schemas.js";
 
@@ -44,6 +45,8 @@ type CteMenuRow = {
   parentId: string | null;
   orden: number;
   icono: string | null;
+  moduleNombre: string;
+  directlyAssigned: boolean;
 };
 
 const menuSelect = {
@@ -381,6 +384,23 @@ export class MenuService {
       throw new HttpError(404, "MENU_NOT_FOUND", "Menú no encontrado");
     }
 
+    const roleModule = await this.db.roleModule.findUnique({
+      where: {
+        roleId_moduleId: {
+          roleId,
+          moduleId: menu.moduleId,
+        },
+      },
+    });
+
+    if (!roleModule || roleModule.estado !== Estado.ACTIVO) {
+      throw new HttpError(
+        400,
+        "MODULE_NOT_ASSIGNED_TO_ROLE",
+        "Asigna primero el módulo al rol antes de asignar sus menús",
+      );
+    }
+
     const existingAssignment = await this.db.roleMenu.findUnique({
       where: {
         roleId_menuId: {
@@ -426,6 +446,24 @@ export class MenuService {
       throw new HttpError(404, "ROLE_NOT_FOUND", "Rol no encontrado");
     }
 
+    const permissionRows = await this.db.rolePermission.findMany({
+      where: {
+        roleId,
+        estado: Estado.ACTIVO,
+        permission: { estado: Estado.ACTIVO },
+      },
+      select: {
+        permission: { select: { codigo: true } },
+      },
+    });
+    const permissionCodes = new Set(permissionRows.map((row) => row.permission.codigo));
+
+    const catalogRows = await this.db.permission.findMany({
+      where: { estado: Estado.ACTIVO },
+      select: { codigo: true },
+    });
+    const catalogPermissions = new Set(catalogRows.map((row) => row.codigo));
+
     const rows = await this.db.$queryRaw<CteMenuRow[]>(Prisma.sql`
       WITH RECURSIVE menu_tree AS (
         SELECT
@@ -435,10 +473,16 @@ export class MenuService {
           m."moduleId",
           m."parentId",
           m.orden,
-          m.icono
+          m.icono,
+          mod.nombre AS "moduleNombre",
+          TRUE AS "directlyAssigned"
         FROM "Menu" m
         INNER JOIN "RoleMenu" rm ON rm."menuId" = m.id
         INNER JOIN "Module" mod ON mod.id = m."moduleId"
+        INNER JOIN "RoleModule" rmod
+          ON rmod."moduleId" = m."moduleId"
+          AND rmod."roleId" = ${roleId}::text
+          AND rmod.estado = 'ACTIVO'::"Estado"
         WHERE rm."roleId" = ${roleId}::text
           AND rm.estado = 'ACTIVO'::"Estado"
           AND m.estado = 'ACTIVO'::"Estado"
@@ -453,10 +497,16 @@ export class MenuService {
           p."moduleId",
           p."parentId",
           p.orden,
-          p.icono
+          p.icono,
+          mod.nombre AS "moduleNombre",
+          FALSE AS "directlyAssigned"
         FROM "Menu" p
         INNER JOIN menu_tree child ON child."parentId" = p.id
         INNER JOIN "Module" mod ON mod.id = p."moduleId"
+        INNER JOIN "RoleModule" rmod
+          ON rmod."moduleId" = p."moduleId"
+          AND rmod."roleId" = ${roleId}::text
+          AND rmod.estado = 'ACTIVO'::"Estado"
         WHERE p.estado = 'ACTIVO'::"Estado"
           AND mod.estado = 'ACTIVO'::"Estado"
       )
@@ -467,8 +517,11 @@ export class MenuService {
         "moduleId",
         "parentId",
         orden,
-        icono
+        icono,
+        "moduleNombre",
+        BOOL_OR("directlyAssigned") AS "directlyAssigned"
       FROM menu_tree
+      GROUP BY id, nombre, url, "moduleId", "parentId", orden, icono, "moduleNombre"
       ORDER BY orden ASC, nombre ASC
     `);
 
@@ -480,10 +533,24 @@ export class MenuService {
     const rootMenus: MenuTreeNode[] = [];
 
     for (const menu of rows) {
+      let safeUrl: string | null = null;
+      if (menu.url) {
+        const allowed =
+          Boolean(menu.directlyAssigned) &&
+          canAccessMenuUrl(menu.url, permissionCodes, menu.moduleNombre, catalogPermissions);
+        if (!allowed) {
+          // Asignado pero sin permiso: no mostrar. Ancestro con URL: solo como grupo.
+          if (menu.directlyAssigned) continue;
+          safeUrl = null;
+        } else {
+          safeUrl = menu.url;
+        }
+      }
+
       menuMap.set(menu.id, {
         id: menu.id,
         nombre: menu.nombre,
-        url: menu.url,
+        url: safeUrl,
         moduleId: menu.moduleId,
         parentId: menu.parentId,
         orden: menu.orden,
@@ -506,6 +573,17 @@ export class MenuService {
       }
     }
 
+    const pruneEmptyGroups = (nodes: MenuTreeNode[]): MenuTreeNode[] => {
+      const kept: MenuTreeNode[] = [];
+      for (const node of nodes) {
+        const children = pruneEmptyGroups(node.children);
+        if (node.url || children.length > 0) {
+          kept.push({ ...node, children });
+        }
+      }
+      return kept;
+    };
+
     const sortRecursive = (nodes: MenuTreeNode[]): void => {
       nodes.sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre));
       for (const node of nodes) {
@@ -513,7 +591,8 @@ export class MenuService {
       }
     };
 
-    sortRecursive(rootMenus);
-    return rootMenus;
+    const pruned = pruneEmptyGroups(rootMenus);
+    sortRecursive(pruned);
+    return pruned;
   }
 }

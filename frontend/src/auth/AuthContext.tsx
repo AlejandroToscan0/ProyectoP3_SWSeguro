@@ -24,6 +24,8 @@ type AuthContextValue = AuthState & {
   needsRoleSelection: boolean;
   login: (email: string, password: string) => Promise<void>;
   selectRole: (roleId: string) => Promise<void>;
+  switchRole: (roleId: string) => Promise<void>;
+  refreshAvailableRoles: () => Promise<void>;
   cancelRoleSelection: () => void;
   logout: () => Promise<void>;
   hasPermission: (code: string) => boolean;
@@ -56,13 +58,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!tempToken) {
       throw new Error("No hay TempToken disponible");
     }
+    const availableRoles = tokenStorage.getRoles();
     const data = await authApi.selectRole(tempToken, roleId);
-    tokenStorage.setSession(data);
+    tokenStorage.setSession({
+      ...data,
+      roles: data.roles && data.roles.length > 0 ? data.roles : availableRoles,
+    });
+    setState(readState());
+  }, []);
+
+  const switchRole = useCallback(async (roleId: string) => {
+    const refreshToken = tokenStorage.getRefreshToken();
+    const data = await authApi.switchRole(roleId, refreshToken);
+    const availableRoles = data.roles && data.roles.length > 0 ? data.roles : tokenStorage.getRoles();
+    tokenStorage.setSession({
+      ...data,
+      roles: availableRoles,
+    });
+    setState(readState());
+  }, []);
+
+  const refreshAvailableRoles = useCallback(async () => {
+    const data = await authApi.myRoles();
+    tokenStorage.setAvailableRoles(data.roles);
     setState(readState());
   }, []);
 
   const cancelRoleSelection = useCallback(() => {
-    // Descarta TempToken y roles pendientes para volver al login.
     tokenStorage.clear();
     setState(readState());
   }, []);
@@ -86,11 +108,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       needsRoleSelection: Boolean(state.tempToken && !state.accessToken),
       login,
       selectRole,
+      switchRole,
+      refreshAvailableRoles,
       cancelRoleSelection,
       logout,
       hasPermission: (code: string) => state.permissions.includes(code),
     }),
-    [state, login, selectRole, cancelRoleSelection, logout],
+    [state, login, selectRole, switchRole, refreshAvailableRoles, cancelRoleSelection, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

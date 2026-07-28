@@ -19,6 +19,7 @@ export type AuthSession = {
   refreshToken: string;
   role: RoleOption;
   permissions: string[];
+  roles?: RoleOption[];
 };
 
 export type LoginResponse = {
@@ -54,7 +55,11 @@ export type SafeModule = {
   id: string;
   nombre: string;
   descripcion: string | null;
+  baseUrl: string | null;
+  healthPath: string | null;
   estado: string;
+  fechaCreacion?: string;
+  fechaActualizacion?: string;
 };
 
 export type SafeMenu = {

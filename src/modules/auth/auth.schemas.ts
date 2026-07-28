@@ -10,6 +10,11 @@ export const selectRoleSchema = z.object({
   roleId: z.string().uuid(),
 });
 
+export const switchRoleSchema = z.object({
+  roleId: z.string().uuid(),
+  refreshToken: z.string().min(30).optional(),
+});
+
 export const refreshTokenSchema = z.object({
   refreshToken: z.string().min(30),
 });
@@ -31,6 +36,7 @@ export const validateTokenSchema = z.object({
 
 export type LoginInput = z.infer<typeof loginSchema>;
 export type SelectRoleInput = z.infer<typeof selectRoleSchema>;
+export type SwitchRoleInput = z.infer<typeof switchRoleSchema>;
 export type RefreshTokenInput = z.infer<typeof refreshTokenSchema>;
 export type LogoutInput = z.infer<typeof logoutSchema>;
 export type ValidateTokenInput = z.infer<typeof validateTokenSchema>;

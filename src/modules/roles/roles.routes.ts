@@ -157,4 +157,23 @@ rolesRouter.post("/:id/permissions", authMiddleware, requirePermissions("ROLES_A
   }
 });
 
+rolesRouter.delete(
+  "/:id/permissions/:permissionId",
+  authMiddleware,
+  requirePermissions("ROLES_ASSIGN_PERMISSION"),
+  async (req: AuthRequest, res, next) => {
+    try {
+      const { id, permissionId } = req.params;
+      if (typeof id !== "string" || typeof permissionId !== "string") {
+        throw new Error("Invalid id");
+      }
+      const removedBy = req.user?.userId ?? "system";
+      await roleService.removePermission(id, permissionId, removedBy);
+      res.status(200).json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 export { rolesRouter };

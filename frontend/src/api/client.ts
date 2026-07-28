@@ -54,6 +54,8 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     method: options.method ?? "GET",
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    // Evita 304 vacío vía proxy (rompe tipados que esperan arrays/objetos).
+    cache: "no-store",
   });
 
   if (response.status === 401 && options.auth !== false && !options.skipRefresh) {
@@ -68,20 +70,22 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   }
 
   const text = await response.text();
-  let payload: Record<string, unknown> = {};
+  let payload: unknown = null;
   if (text) {
     try {
-      payload = JSON.parse(text) as Record<string, unknown>;
+      payload = JSON.parse(text) as unknown;
     } catch {
-      payload = {};
+      payload = null;
     }
   }
 
   if (!response.ok) {
+    const errorPayload =
+      payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
     throw new ApiError(
       response.status,
-      typeof payload.error === "string" ? payload.error : "REQUEST_FAILED",
-      typeof payload.message === "string" ? payload.message : "Error en la solicitud",
+      typeof errorPayload.error === "string" ? errorPayload.error : "REQUEST_FAILED",
+      typeof errorPayload.message === "string" ? errorPayload.message : "Error en la solicitud",
     );
   }
 

@@ -95,6 +95,8 @@ async function main() {
     "MENUS_DELETE",
     "VENTAS_READ",
     "VENTAS_CREATE",
+    "RESERVAS_READ",
+    "RESERVAS_CREATE",
   ];
   for (const code of permissions) {
     const permission = await prisma.permission.upsert({
@@ -358,10 +360,17 @@ async function main() {
 
   const ventasModule = await prisma.module.upsert({
     where: { nombre: "Ventas" },
-    update: { estado: Estado.ACTIVO, actualizadoPor: "seed" },
+    update: {
+      estado: Estado.ACTIVO,
+      baseUrl: "http://localhost:3001",
+      healthPath: "/health",
+      actualizadoPor: "seed",
+    },
     create: {
       nombre: "Ventas",
       descripcion: "Microservicio hijo de ventas (Zero Trust)",
+      baseUrl: "http://localhost:3001",
+      healthPath: "/health",
       estado: Estado.ACTIVO,
       creadoPor: "seed",
       actualizadoPor: "seed",

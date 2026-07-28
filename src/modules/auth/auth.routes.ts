@@ -1,8 +1,9 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { prisma } from "../../lib/prisma.js";
+import { authMiddleware, type AuthRequest } from "../../middlewares/auth.middleware.js";
 import { AuthService } from "./auth.service.js";
-import { loginSchema, logoutSchema, refreshTokenSchema, selectRoleSchema } from "./auth.schemas.js";
+import { loginSchema, logoutSchema, refreshTokenSchema, selectRoleSchema, switchRoleSchema } from "./auth.schemas.js";
 
 const authRouter = Router();
 const authService = new AuthService(prisma);
@@ -47,6 +48,42 @@ authRouter.post("/select-role", authRateLimit, async (req, res, next) => {
       userAgent: meta.userAgent ?? undefined,
     });
     res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+authRouter.post("/switch-role", authRateLimit, authMiddleware, async (req: AuthRequest, res, next) => {
+  try {
+    const input = switchRoleSchema.parse(req.body);
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: "MISSING_TOKEN", message: "Token de autenticación requerido" });
+      return;
+    }
+    const meta = {
+      ip: req.ip,
+      userAgent: req.get("user-agent"),
+    };
+    const result = await authService.switchRole(user.userId, user.roleId, input, {
+      ip: meta.ip ?? undefined,
+      userAgent: meta.userAgent ?? undefined,
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+authRouter.get("/my-roles", authMiddleware, async (req: AuthRequest, res, next) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: "MISSING_TOKEN", message: "Token de autenticación requerido" });
+      return;
+    }
+    const roles = await authService.listActiveRoles(user.userId);
+    res.status(200).json({ roles, activeRoleId: user.roleId });
   } catch (error) {
     next(error);
   }

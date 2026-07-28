@@ -14,9 +14,9 @@ import {
 
 const PRESETS: Record<string, { permissions: string[]; menuIds: string[]; moduleNames: string[] }> = {
   VENDEDOR: {
-    permissions: ["AUTH_LOGIN", "AUTH_SELECT_ROLE", "VENTAS_READ", "VENTAS_CREATE"],
+    permissions: ["AUTH_LOGIN", "AUTH_SELECT_ROLE", "VENTAS_READ", "VENTAS_CREATE", "RESERVAS_READ"],
     menuIds: ["menu-ventas"],
-    moduleNames: ["Ventas"],
+    moduleNames: ["Ventas", "Reservas"],
   },
   AUDITOR: {
     permissions: [
@@ -27,9 +27,10 @@ const PRESETS: Record<string, { permissions: string[]; menuIds: string[]; module
       "MODULES_READ",
       "MENUS_READ",
       "VENTAS_READ",
+      "RESERVAS_READ",
     ],
     menuIds: ["menu-usuarios", "menu-roles", "menu-modulos", "menu-menus", "menu-ventas"],
-    moduleNames: ["Administración", "Ventas"],
+    moduleNames: ["Administración", "Ventas", "Reservas"],
   },
 };
 
@@ -68,19 +69,45 @@ export function RolesPage() {
   const assignedMenuIds = useMemo(() => new Set(detail?.menus.map((item) => item.id) ?? []), [detail]);
   const assignedUserIds = useMemo(() => new Set(detail?.users.map((item) => item.id) ?? []), [detail]);
 
+  const assignableMenus = useMemo(() => {
+    if (!detail) return [];
+    return menus.filter((menu) => assignedModuleIds.has(menu.moduleId) || assignedMenuIds.has(menu.id));
+  }, [menus, detail, assignedModuleIds, assignedMenuIds]);
+
   const loadCatalog = useCallback(async () => {
-    const [rolesRes, usersRes, permsRes, modulesRes, menusRes] = await Promise.all([
+    const settled = await Promise.allSettled([
       rolesApi.list(),
       usersApi.list(),
       permissionsApi.list(),
       modulesApi.list(),
       menusApi.list(),
     ]);
-    setRoles(rolesRes.data);
-    setUsers(usersRes.data);
-    setPermissions(permsRes.data);
-    setModules(modulesRes.data);
-    setMenus(menusRes.data);
+
+    const [rolesRes, usersRes, permsRes, modulesRes, menusRes] = settled;
+    const failures: string[] = [];
+
+    if (rolesRes.status === "fulfilled") setRoles(rolesRes.value.data);
+    else failures.push("roles");
+
+    if (usersRes.status === "fulfilled") setUsers(usersRes.value.data);
+    else failures.push("usuarios");
+
+    if (permsRes.status === "fulfilled") setPermissions(permsRes.value.data);
+    else failures.push("permisos");
+
+    if (modulesRes.status === "fulfilled") setModules(modulesRes.value.data);
+    else failures.push("módulos");
+
+    if (menusRes.status === "fulfilled") setMenus(menusRes.value.data);
+    else failures.push("menús");
+
+    if (rolesRes.status === "rejected") {
+      throw rolesRes.reason instanceof Error ? rolesRes.reason : new Error("Error al cargar roles");
+    }
+
+    if (failures.length > 0) {
+      setError(`Catálogo parcial: no se pudieron cargar ${failures.join(", ")}`);
+    }
   }, []);
 
   const loadDetail = useCallback(async (roleId: string) => {
@@ -425,22 +452,30 @@ export function RolesPage() {
 
               <div className="assign-block">
                 <h4>Menús ({detail.menus.length})</h4>
+                <p className="muted">
+                  Solo se listan menús de módulos ya asignados al rol. El lateral del usuario también exige el permiso de lectura.
+                </p>
                 <div className="check-grid">
-                  {menus.map((menu) => {
+                  {assignableMenus.map((menu) => {
                     const active = assignedMenuIds.has(menu.id);
+                    const moduleReady = assignedModuleIds.has(menu.moduleId);
                     return (
                       <button
                         key={menu.id}
                         type="button"
                         className={`check-chip ${active ? "on" : ""}`}
-                        disabled={busy || !canAssignMenu || active}
+                        disabled={busy || !canAssignMenu || active || !moduleReady}
                         onClick={() => void onToggleMenu(menu)}
+                        title={!moduleReady ? "Asigna primero el módulo" : (menu.url ?? menu.nombre)}
                       >
                         {menu.nombre}
-                        {menu.url ? ` (${menu.url})` : ""}
+                        {menu.url ? ` (${menu.url})` : " (grupo)"}
                       </button>
                     );
                   })}
+                  {assignableMenus.length === 0 ? (
+                    <p className="muted">Asigna un módulo al rol para poder elegir sus menús.</p>
+                  ) : null}
                 </div>
               </div>
             </>

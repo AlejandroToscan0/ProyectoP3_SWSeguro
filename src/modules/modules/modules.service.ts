@@ -2,10 +2,25 @@ import { Estado, type PrismaClient } from "@prisma/client";
 import { HttpError } from "../../common/http-error.js";
 import type { CreateModuleInput, UpdateModuleInput, AssignModuleToRoleInput, ListModulesInput } from "./modules.schemas.js";
 
+const moduleSelect = {
+  id: true,
+  nombre: true,
+  descripcion: true,
+  baseUrl: true,
+  healthPath: true,
+  estado: true,
+  fechaCreacion: true,
+  fechaActualizacion: true,
+  creadoPor: true,
+  actualizadoPor: true,
+} as const;
+
 type SafeModule = {
   id: string;
   nombre: string;
   descripcion: string | null;
+  baseUrl: string | null;
+  healthPath: string | null;
   estado: Estado;
   fechaCreacion: Date;
   fechaActualizacion: Date;
@@ -47,16 +62,7 @@ export class ModuleService {
         where,
         skip,
         take: limit,
-        select: {
-          id: true,
-          nombre: true,
-          descripcion: true,
-          estado: true,
-          fechaCreacion: true,
-          fechaActualizacion: true,
-          creadoPor: true,
-          actualizadoPor: true,
-        },
+        select: moduleSelect,
         orderBy: { fechaCreacion: "desc" },
       }),
       this.db.module.count({ where }),
@@ -74,16 +80,7 @@ export class ModuleService {
   async findById(id: string): Promise<SafeModule> {
     const module = await this.db.module.findUnique({
       where: { id },
-      select: {
-        id: true,
-        nombre: true,
-        descripcion: true,
-        estado: true,
-        fechaCreacion: true,
-        fechaActualizacion: true,
-        creadoPor: true,
-        actualizadoPor: true,
-      },
+      select: moduleSelect,
     });
 
     if (!module) {
@@ -102,27 +99,18 @@ export class ModuleService {
       throw new HttpError(409, "MODULE_NAME_ALREADY_EXISTS", "El nombre del módulo ya existe");
     }
 
-    const module = await this.db.module.create({
+    return this.db.module.create({
       data: {
         nombre: input.nombre,
         descripcion: input.descripcion ?? null,
+        baseUrl: input.baseUrl ?? null,
+        healthPath: input.healthPath ?? null,
         estado: Estado.ACTIVO,
         creadoPor: createdBy,
         actualizadoPor: createdBy,
       },
-      select: {
-        id: true,
-        nombre: true,
-        descripcion: true,
-        estado: true,
-        fechaCreacion: true,
-        fechaActualizacion: true,
-        creadoPor: true,
-        actualizadoPor: true,
-      },
+      select: moduleSelect,
     });
-
-    return module;
   }
 
   async update(id: string, input: UpdateModuleInput, updatedBy: string): Promise<SafeModule> {
@@ -144,33 +132,17 @@ export class ModuleService {
       }
     }
 
-    const updateData: {
-      nombre?: string;
-      descripcion?: string | null;
-      actualizadoPor: string;
-    } = {
-      actualizadoPor: updatedBy,
-    };
-
-    if (input.nombre) updateData.nombre = input.nombre;
-    if (input.descripcion !== undefined) updateData.descripcion = input.descripcion ?? null;
-
-    const updatedModule = await this.db.module.update({
+    return this.db.module.update({
       where: { id },
-      data: updateData,
-      select: {
-        id: true,
-        nombre: true,
-        descripcion: true,
-        estado: true,
-        fechaCreacion: true,
-        fechaActualizacion: true,
-        creadoPor: true,
-        actualizadoPor: true,
+      data: {
+        ...(input.nombre ? { nombre: input.nombre } : {}),
+        ...(input.descripcion !== undefined ? { descripcion: input.descripcion } : {}),
+        ...(input.baseUrl !== undefined ? { baseUrl: input.baseUrl } : {}),
+        ...(input.healthPath !== undefined ? { healthPath: input.healthPath } : {}),
+        actualizadoPor: updatedBy,
       },
+      select: moduleSelect,
     });
-
-    return updatedModule;
   }
 
   async delete(id: string, deletedBy: string): Promise<SafeModule> {
@@ -182,6 +154,11 @@ export class ModuleService {
         },
         menus: {
           where: { estado: Estado.ACTIVO },
+          include: {
+            children: {
+              where: { estado: Estado.ACTIVO },
+            },
+          },
         },
       },
     });
@@ -194,33 +171,38 @@ export class ModuleService {
       throw new HttpError(400, "MODULE_ALREADY_INACTIVE", "El módulo ya está inactivo");
     }
 
+    const leafMenus = module.menus.filter((menu) => menu.children.length === 0);
+    const parentMenus = module.menus.filter((menu) => menu.children.length > 0);
+
+    for (const menu of [...leafMenus, ...parentMenus]) {
+      await this.db.roleMenu.updateMany({
+        where: { menuId: menu.id, estado: Estado.ACTIVO },
+        data: { estado: Estado.INACTIVO, actualizadoPor: deletedBy },
+      });
+      await this.db.menu.update({
+        where: { id: menu.id },
+        data: { estado: Estado.INACTIVO, actualizadoPor: deletedBy },
+      });
+    }
+
     if (module.roleModules.length > 0) {
-      throw new HttpError(400, "MODULE_HAS_ACTIVE_ROLES", "El módulo tiene roles activos asignados");
+      await this.db.roleModule.updateMany({
+        where: { moduleId: id, estado: Estado.ACTIVO },
+        data: { estado: Estado.INACTIVO, actualizadoPor: deletedBy },
+      });
     }
 
-    if (module.menus.length > 0) {
-      throw new HttpError(400, "MODULE_HAS_ACTIVE_MENUS", "El módulo tiene menús activos");
-    }
+    const archivedName = `${module.nombre}__archived__${Date.now()}`.slice(0, 100);
 
-    const deletedModule = await this.db.module.update({
+    return this.db.module.update({
       where: { id },
       data: {
+        nombre: archivedName,
         estado: Estado.INACTIVO,
         actualizadoPor: deletedBy,
       },
-      select: {
-        id: true,
-        nombre: true,
-        descripcion: true,
-        estado: true,
-        fechaCreacion: true,
-        fechaActualizacion: true,
-        creadoPor: true,
-        actualizadoPor: true,
-      },
+      select: moduleSelect,
     });
-
-    return deletedModule;
   }
 
   async assignToRole(roleId: string, input: AssignModuleToRoleInput, assignedBy: string): Promise<void> {
@@ -261,16 +243,17 @@ export class ModuleService {
           actualizadoPor: assignedBy,
         },
       });
-    } else {
-      await this.db.roleModule.create({
-        data: {
-          roleId,
-          moduleId: input.moduleId,
-          estado: Estado.ACTIVO,
-          creadoPor: assignedBy,
-          actualizadoPor: assignedBy,
-        },
-      });
+      return;
     }
+
+    await this.db.roleModule.create({
+      data: {
+        roleId,
+        moduleId: input.moduleId,
+        estado: Estado.ACTIVO,
+        creadoPor: assignedBy,
+        actualizadoPor: assignedBy,
+      },
+    });
   }
 }
