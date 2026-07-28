@@ -47,6 +47,19 @@ export const menusApi = {
   list() {
     return apiRequest<Paginated<SafeMenu>>("/api/menus?limit=100");
   },
+  create(input: {
+    nombre: string;
+    url?: string | null;
+    moduleId: string;
+    parentId?: string | null;
+    orden?: number;
+    icono?: string | null;
+  }) {
+    return apiRequest<SafeMenu>("/api/menus", {
+      method: "POST",
+      body: input,
+    });
+  },
 };
 
 export const usersApi = {
@@ -117,6 +130,12 @@ export const permissionsApi = {
 export const modulesApi = {
   list() {
     return apiRequest<Paginated<SafeModule>>("/api/modules?limit=100");
+  },
+  create(input: { nombre: string; descripcion?: string }) {
+    return apiRequest<SafeModule>("/api/modules", {
+      method: "POST",
+      body: input,
+    });
   },
 };
 
